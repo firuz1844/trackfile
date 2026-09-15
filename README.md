@@ -3,37 +3,287 @@
 **Git-native task tracker for humans and coding agents.**
 Tasks live in Markdown next to your code; every edit is a commit.
 
-> **Status: placeholder.** This `0.0.x` release only reserves the package
-> name. The tool itself is being extracted from a private project and is not
-> published yet. Watch the repository for the first release:
-> https://github.com/firuz1844/trackfile
-
-## What Trackfile will be
-
-- **Tasks in your repository.** Milestones, tasks, subtasks, comments and
-  attachments are plain files under `PROJECT/`, versioned by Git. Diffs are
-  readable, history is `git log`, conflicts are resolved like code.
-- **One source of truth for people and AI agents.** A single `PROJECT.md`
-  (Markdown with YAML front matter) plus a short protocol for coding agents
-  (Claude Code, Codex, Cursor, …): no change without a task number,
-  compare-and-swap ID allocation, task ↔ document back-links, `#NNN` in
-  every commit subject.
-- **A dashboard with no build step.** Static HTML and a dependency-free
-  Node server bound to `127.0.0.1`: board and tree views, Markdown editor,
-  source reader with uncommitted-change and task-mention highlighting,
-  commit pages with diffs.
-- **Every action is a commit.** Creating a task, commenting, editing —
-  each becomes a focused commit like `#042 [new task]: …`, so agents and
-  humans stay accountable to the same log.
-- **Nothing leaves your machine.** No cloud, no database, no telemetry.
-
-## Planned usage
-
 ```sh
-npx trackfile        # start the dashboard in the current repository
+npx trackfile init --agents claude,codex   # TRACKFILE.md, .trackfile/, rules for your agents
+npx trackfile --open                       # dashboard on http://127.0.0.1:3737/
 ```
 
-Until the first release the command prints a notice and exits with code 1.
+- **Tasks in your repository.** Milestones, features, tasks, subtasks, comments and attachments are plain
+  files versioned by Git: `TRACKFILE.md` at the root and a `.trackfile/` folder. Diffs are readable, history
+  is `git log`, conflicts are resolved like code.
+- **One source of truth for people and AI agents.** A single registry (Markdown with YAML front matter) plus a
+  short protocol for coding agents — Claude Code, Codex, Cursor, Gemini CLI and any tool that reads
+  `AGENTS.md`: no change without a task number, compare-and-swap ID allocation, task ↔ document back-links,
+  `#NNN` in every commit subject. `trackfile init` installs the protocol where each agent looks for it.
+- **A dashboard with no build step.** Static HTML and a dependency-free Node server bound to `127.0.0.1`:
+  dashboard, task tree, milestone pages, Markdown editor with preview, a source reader with task-mention and
+  uncommitted-change highlighting, commit pages with diffs, attachments. English and Russian UI.
+- **Every action is a commit.** Creating a task, commenting, editing, archiving, attaching a file — each
+  becomes a focused commit like `#042 [new task]: …` touching only the files it changed.
+- **Nothing leaves your machine.** No cloud, no database, no telemetry, no network requests beyond the local
+  server. The tracker's code is never copied into your repository — only the data files are.
+
+Requirements: Node.js ≥ 18, Git. Chrome/Edge/Safari/Firefox for the dashboard.
+
+## Getting started
+
+```sh
+cd your-repository
+npx trackfile init --agents claude,codex,cursor
+git add TRACKFILE.md .trackfile .gitignore AGENTS.md CLAUDE.md .claude .cursor
+git commit -m "#000: add Trackfile"
+npx trackfile --open
+```
+
+`init` never overwrites anything: an existing registry, agent rule file, block or launch entry is reported
+and skipped. Run it again after upgrading the package with `--force` to refresh the agent rules; `--dry-run`
+prints the plan without writing. Options:
+
+| Option | Meaning |
+| --- | --- |
+| `--name NAME` | Project name in the front matter (default: folder name) |
+| `--agents LIST` | `claude`, `codex`, `cursor`, `gemini`, `zed`, `opencode`, `jules` or `all` (comma-separated; asked interactively when omitted) |
+| `--global` | Also install the rules at user level where the agent reads them (`~/.claude/skills/trackfile/`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`) |
+| `--force` | Update already installed agent rules to this version |
+| `--dry-run` | Print what would be created, write nothing |
+| `--launch` | Add the dashboard to `.claude/launch.json` (done automatically for `claude`) |
+
+Where the rules land:
+
+| Agent | Project file | Format |
+| --- | --- | --- |
+| Claude Code | `.claude/skills/trackfile/SKILL.md` + a short pointer block in `CLAUDE.md` | skill (`name: trackfile`) |
+| Codex, Zed, OpenCode, Jules | `AGENTS.md` | marked block `<!-- trackfile:start … -->` with the full protocol |
+| Cursor | `.cursor/rules/trackfile.mdc` | rule with `alwaysApply: true` |
+| Gemini CLI | `GEMINI.md` | marked block |
+
+The protocol text itself is [`skill/PROTOCOL.md`](skill/PROTOCOL.md): read it once to know what your agents
+are held to. It is the single source for every installed variant.
+
+## Commands
+
+```
+trackfile [serve] [--open] [--port N] [--registry FILE]   start the dashboard (default command)
+trackfile init [--name NAME] [--agents LIST] [--global] [--force] [--dry-run] [--launch]
+trackfile toc [--closed] [--all] [--registry FILE]         table of contents for agents
+```
+
+`serve` and `toc` look for `TRACKFILE.md` upwards from the current directory (like Git looks for `.git`), so
+they work from any subfolder. `--registry` names a differently placed registry (for example
+`--registry docs/PROJECT.md`). The port defaults to 3737 (`PORT` or `--port`); `--open` launches the browser.
+Only one dashboard per repository is needed — it re-reads the files every 2.5 s while the tab is visible.
+
+In Claude Code the dashboard is described in `.claude/launch.json` (entry `trackfile`) and opens in the
+built-in browser panel.
+
+## Files in your repository
+
+```
+TRACKFILE.md               # the registry: milestones, next_task, open and recently closed tasks — committed
+.trackfile/
+  archive.md               # closed tasks older than a week, same format — committed
+  tasks/042/comments.md    # comments of task 042 — committed
+  tasks/042/logo.png       # attachments of task 042 — committed
+  config.json              # one person's dashboard state (filters, theme, language) — git-ignored
+```
+
+The paths are parameters with these defaults. A project may override the three secondary paths in the
+registry's front matter (`archive_file`, `tasks_dir`, `config_file`, relative to the repository root) and the
+registry itself with `--registry`; relative links in task text are resolved relative to the registry file.
+
+## Agents and the registry
+
+Agents do not need the dashboard: they read and edit the files directly by the protocol. The protocol is
+short; its core is:
+
+1. **No change without a task.** Before touching any file the agent names the `### TASK NNN` it works on and
+   records it in `TRACKFILE.md` (`in_progress`, `assignee`, `branch`, `updated_at`).
+2. **Read by the table of contents, not in full:** `npx trackfile toc` prints one line per open task (number,
+   status, effective milestone, parent, kind, title, comment count); `--closed` adds closed tasks, `--all` the
+   archive. Without Node: `grep -A8 '^### TASK' TRACKFILE.md | grep -E '^(### TASK|title:|status:|parent:|milestone:)'`.
+3. **Pick the task in order:** the number the user named → an existing task that matches unambiguously → a new
+   task in the fitting milestone → a new milestone. Closed tasks are not candidates.
+4. **Allocate numbers as a compare-and-swap** on `next_task`, re-reading the file right before the insert.
+5. **Finish in `review`, without a commit.** `done` and the commit come only after the user's explicit
+   permission. The commit subject starts with the task numbers (`#134 #135: …`), changed logic carries a
+   `// #NNN: why` comment, documentation paragraphs carry `[#NNN](…/TRACKFILE.md#task-NNN)` marks and the
+   document path goes into the task's `sources`.
+6. **Comments are instructions.** `#### COMMENT N [ ]` blocks in `.trackfile/tasks/NNN/comments.md` are
+   mandatory context; a fully handled one becomes `[x]`.
+
+## The dashboard
+
+Pages: dashboard (milestone progress, pinned tasks, recent changes), task tree with search, multi-status and
+milestone filters, milestone pages (progress, description, the milestone's own tree), task pages (description,
+result, sources, subtasks, files, comments), a source reader and commit pages. Every page-level move is a
+browser history entry with a deep link: `#tree`, `#task/042`, `#task/042/comment/3`, `#milestone/M02`,
+`#source/docs/design.md`, `#commit/<hash>`.
+
+Tasks are created with **New task** / **Subtask** (an existing task can be made a subtask too); title,
+description, parent and milestone are editable only while the task is `to-do` with no assignee — everything
+else belongs to the agent that took it. Status changes through **Change status** (on the page and in the
+context menu opened with the right mouse button on any task element): `done` stamps `completed_at`, leaving
+`done` clears it, `in_progress` without an assignee assigns `User`. Milestones are created and edited with
+their explicit set of tasks; a subtask without a milestone inherits its parent's.
+
+Description, result, comments and milestone descriptions are Markdown (headings, lists, code, quotes, tables,
+links, images) rendered through `textContent` only — HTML stays text. A single line break inside a paragraph
+is kept, as in GitHub comments. The text fields have a Markdown helper: ⌘B/⌘I/⌘E wrap the selection, ⌘K makes
+a link, Enter continues lists, Tab/⇧Tab indent, a **Preview** tab renders the result. `#NNN.K` in text links
+to comment K of task NNN; `[#NNN](TRACKFILE.md#task-NNN)` opens the task page.
+
+**Files.** Any task can hold attachments (`.trackfile/tasks/NNN/`): drag them in from the task page, the card
+or the editor. Images are compressed on the client (long side 1600 px, JPEG or PNG when transparent) and
+inserted into the description as `![name](.trackfile/tasks/NNN/name#w=320)`; `#w=` sets the display size and
+is ignored by other viewers. Every upload and deletion is its own commit.
+
+**Reader.** Paths from a task's `sources` open in a read-only reader (text files under the repository root,
+never dotfiles or `.git`, up to 2 MB) with syntax highlighting and, for Markdown, rendered output whose links
+open in the same reader. Opened from a task, the reader highlights every mention of it — back-link marks,
+`#NNN` and `TASK NNN` in text and code comments — with "‹ ›" navigation. Uncommitted changes of the file
+(`git diff HEAD`, index plus working tree) are shown in place: added lines green on the narrowest block,
+deleted lines red where they were.
+
+**Commit pages.** A task's commit hash links to a page with the message (task numbers linked), author, date,
+parents, tasks that reference the commit, the file list and a unified diff per file.
+
+**Archive.** On load, closed tasks (`done`/`cancelled`/`removed`) older than seven days move from
+`TRACKFILE.md` to `.trackfile/archive.md` in one write and one commit (`#001 #002 [auto archive]: …`); a
+feature with open subtasks stays. **Archive** / **Unarchive** move a task by hand in either direction; a
+task returned by hand is left alone until its status changes; reopening an archived task returns it
+automatically. Archived tasks are hidden in the tree until **Show archive** is ticked and never count
+differently in progress. Agents never archive: they set `done`, the dashboard moves the record.
+
+**Concurrency.** The dashboard writes each file with a compare-and-swap against the content it last read; an
+external change (an agent editing the registry) blocks the save, keeps your draft in the form and asks you to
+reload. An externally edited `config.json` is never silently overwritten either. Agents and the dashboard
+share no lock: do not edit the same file in the dashboard and in an editor at the same time.
+
+**Language and theme.** English by default, Russian when the browser prefers it; the switch at the bottom of
+the sidebar stores an explicit choice in `.trackfile/config.json`, next to the theme. Status values, YAML keys
+and file names are never translated. A string missing from the dictionary is shown as its key, never dropped.
+
+## Registry format (schema 1)
+
+`TRACKFILE.md` is Markdown with a YAML front matter and a flat YAML block per record. Only a documented
+subset of YAML is accepted: flat `key: value` pairs with keys `[a-z][a-z_]*`; strings in double quotes with
+JSON escaping (`"042"` is always a string); `null`, integers, `true`/`false`; arrays as inline JSON
+(`["a", "b"]`); bare identifiers such as `to-do`; comments on their own line. Nested objects, anchors, single
+quotes, `|`/`>` blocks and inline comments are rejected. Unknown fields are preserved on edit; an unknown
+`schema` is refused.
+
+```yaml
+---
+schema: 1
+project: "Sample"
+next_task: 43
+---
+```
+
+`next_task` is a monotonic counter strictly greater than every existing ID; task IDs have at least three
+digits, milestone IDs are `M` plus at least two digits; IDs are never reused. The file has a `## Milestones`
+section and a `## Tasks` section (the section names are free — the parser only uses `## ` headings as
+boundaries); each record is an exact heading followed immediately by a `yaml` fence:
+
+````markdown
+### MILESTONE M01
+```yaml
+id: "M01"
+title: "First milestone"
+priority: "normal"
+```
+
+Free-form description of the milestone.
+
+### TASK 042
+```yaml
+id: "042"
+title: "Task title"
+kind: "task"
+parent: "038"
+milestone: null
+status: "to-do"
+author: "User"
+assignee: null
+created_at: "2026-01-01T12:00:00+00:00"
+updated_at: "2026-01-01T12:00:00+00:00"
+completed_at: null
+branch: null
+commit: null
+result: ""
+sources: ["docs/design.md"]
+```
+
+Description in Markdown. `#`, `##`, `###` are reserved for the structure — use `####` or plain text.
+````
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | `feature` — a lasting capability or group; `task` — concrete work |
+| `parent` | ID of the parent or `null`; cycles and missing parents are rejected |
+| `milestone` | ID or `null`; `null` inherits the nearest explicitly set ancestor milestone |
+| `status` | `to-do`, `in_progress`, `review`, `done`, `cancelled`, `removed`. Agents finish in `review`; `done` and the commit follow the user's acceptance |
+| `author` | Who created the record: `User`, `Claude`, `Codex`, … The dashboard writes `User` |
+| `assignee` | Who took the work; `in_progress` requires one |
+| `created_at`, `updated_at` | ISO 8601 with a timezone offset; `updated_at` drives "newest first" sorting |
+| `completed_at` | When the task became `done`; `null` otherwise |
+| `branch`, `commit` | The real branch and an existing implementation commit, or `null` |
+| `result` | What was done, how it was verified, what remains |
+| `sources` | Repository-relative paths to documents and code backing the status; Markdown documents in this list carry back-link marks |
+| `priority` (milestones) | `low` / `normal` / `high`; absent means `normal` |
+
+Progress = `done / leaf active tasks`: a leaf is a record without children; `cancelled`/`removed` records and
+all their descendants are excluded; `review` is not `done`; archived tasks count like active ones.
+
+**Comments** live in `.trackfile/tasks/NNN/comments.md`, never in the registry (a `#### COMMENT` inside a
+record is a format error). The file holds only numbered blocks; numbers grow from 1 and are never reused, so
+`#42.3` always means the same comment. `[ ]` is open, `[x]` handled.
+
+````markdown
+#### COMMENT 1 [ ]
+```yaml
+id: 1
+author: "User"
+updated_at: "2026-01-02T12:00:00+00:00"
+```
+
+Please also cover the empty state.
+````
+
+**Archive** (`.trackfile/archive.md`) has the same record format with front matter `schema: 1`, `project`,
+`archive: true`, no milestones and no `next_task`; every archived record carries `archived_at`, which is
+forbidden in the registry. Both files parse into one tree: a parent may live in the other file, IDs are
+unique across both.
+
+## Local server API
+
+All routes are bound to `127.0.0.1` and read/write only the files above.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/registry` | The whole registry in one response: `layout` and `files` (`registry`, `archive`, `comments/NNN`) |
+| `GET/PUT /api/file/<name>` | One file by logical name (`registry`, `archive`, `config`, `comments/NNN`); `PUT {text, expected}` writes only when `expected` matches the current content (409 otherwise); `text: null` deletes |
+| `POST /api/git/commit` | `{operation, taskId(s), title, files}` → one commit of exactly those registry files with subject `#NNN [operation]: title` |
+| `GET /api/source/<path>` | Read-only text file under the repository root with its uncommitted `-U0` patch |
+| `GET /api/commit/<hash>` | Commit metadata, numstat and patch (4 MB cap) |
+| `GET/PUT/DELETE /api/files/<NNN>[/<name>]` | List, upload (raw body) and delete attachments; `GET /attachments/<NNN>/<name>` serves them |
+
+Errors are JSON `{error, code, params}`; the dashboard translates known codes.
+
+## Development
+
+```sh
+npm test                       # node --test tests/*.test.cjs — model, server, CLI, i18n, renderer, helpers
+npm run test:browser           # Playwright + Chrome: NODE_PATH to a folder with playwright, CHROME_PATH optional
+```
+
+Unit tests run on synthetic registries in temporary folders; the browser test starts the server on a
+throwaway Git repository and drives the dashboard end to end (creating, editing, commenting, committing,
+switching language, mobile layout). Nothing reads or writes a real project.
+
+The code is plain scripts without a bundler: `app/` is the UI (served as is), `lib/` the server, layout
+discovery, `init` and `toc`, `bin/trackfile.js` the CLI, `skill/PROTOCOL.md` the agent protocol,
+`templates/` the files `init` creates.
 
 ## License
 

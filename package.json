@@ -1,6 +1,6 @@
 {
   "name": "trackfile",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Git-native task tracker for humans and coding agents. Tasks live in Markdown next to your code; every edit is a commit.",
   "keywords": ["task-tracker", "issue-tracker", "markdown", "git", "project-management", "ai-agents", "claude-code", "codex", "local-first"],
   "homepage": "https://github.com/firuz1844/trackfile#readme",
@@ -9,7 +9,9 @@
   "license": "MIT",
   "author": "Firuz Narzikulov",
   "bin": { "trackfile": "bin/trackfile.js" },
-  "files": ["bin", "README.md", "LICENSE"],
+  "main": "lib/serve.cjs",
+  "files": ["bin", "lib", "app", "skill", "templates", "README.md", "CHANGELOG.md", "LICENSE"],
+  "scripts": { "test": "node --test tests/*.test.cjs", "test:browser": "node tests/browser.cjs" },
   "engines": { "node": ">=18" },
   "publishConfig": { "access": "public" }
 }
