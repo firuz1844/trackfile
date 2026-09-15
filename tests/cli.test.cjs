@@ -68,6 +68,11 @@ test('init creates the registry, archive, .gitignore and agent rules; a second r
   const updated = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
   assert.ok(updated.includes(`v=${agents.VERSION}`) && updated.startsWith('# Existing rules') && updated.trimEnd().endsWith('Trailing notes.'));
   assert.equal((updated.match(/trackfile:start/g) || []).length, 1, 'one block, never duplicated');
+  // --force also rewrites rules that are at the current version (the protocol text can change without a release).
+  fs.writeFileSync(path.join(root, '.claude', 'skills', 'trackfile', 'SKILL.md'), skill.replace('### No change without a task', '### Edited by hand'));
+  assert.equal(init.run({ cwd: root, agents: ['claude'], ...quiet }).changed, 0, 'same version: skipped without --force');
+  assert.equal(init.run({ cwd: root, agents: ['claude'], force: true, ...quiet }).changed >= 1, true);
+  assert.ok(fs.readFileSync(path.join(root, '.claude', 'skills', 'trackfile', 'SKILL.md'), 'utf8').includes('### No change without a task'));
   assert.throws(() => init.resolveAgents(['nope']), /Unknown agents/);
   assert.deepEqual(init.resolveAgents(['all']), Object.keys(agents.AGENTS));
 });

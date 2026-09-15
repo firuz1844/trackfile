@@ -38,14 +38,34 @@ Trackfile is the task registry of this repository: `TRACKFILE.md` at the reposit
   ```
   ````
 
-  Then a blank line and the description in Markdown; `#`, `##`, `###` are reserved for the structure — use `####` or plain text inside descriptions. New tasks go to the end of `## Tasks`. `kind` is `feature` (a lasting capability/group) or `task` (concrete work); `milestone: null` inherits the nearest ancestor's milestone.
+  Then a blank line and the description in Markdown: what must change and how the result is verified. `#`, `##`, `###` are reserved for the structure — use `####` or plain text inside descriptions. New tasks go to the end of `## Tasks`.
+
+### Fields
+
+- `kind`: `feature` — a lasting capability or a group of tasks; `task` — concrete work with a verifiable result.
+- `parent`: ID of the feature/task this record belongs to, or `null`. Cycles and missing parents are format errors.
+- `milestone`: ID from `## Milestones` or `null`; `null` inherits the nearest ancestor's milestone. A milestone is planning metadata and may be changed in any status.
+- `status`: `to-do` (not started), `in_progress` (taken; `assignee` required), `review` (finished, waiting for the user's acceptance), `done` (accepted by the user), `cancelled` / `removed` (closed without a result; excluded from progress with all descendants).
+- `author`: who created the record — your agent marker (`Claude`, `Codex`, `Gemini`, …) or `User`. It is the author of the registry entry, never a claim about who implemented the work. Never rewrite another author's marker; the dashboard writes `User` when a person edits.
+- `assignee`: who is doing the work now, or `null`. Set your marker when you take a task, keep it while the task is `in_progress`/`review`.
+- `created_at`: when the record was created; never changed afterwards. `updated_at`: the last modification of the record; refresh it on every change. `completed_at`: when the task became `done`; `null` otherwise. All dates are ISO 8601 with a timezone offset.
+- `branch`, `commit`: the real branch and an existing commit of the implementation, or `null`. Never a placeholder, never a guessed hash.
+- `result`: what was done, how it was verified, what remains or is not covered. Written when the task moves to `review`; updated when the task is resumed.
+- `sources`: repository-relative paths to the documents, code and tests that back the task's status and result (design docs, ADRs, specs, changed source files, tests). Every task that reaches `review` must have the evidence for its result in `sources`; when the status of an existing task rests on a document or code, add the path here rather than describing it in prose only. Markdown documents in this list carry back-link marks (see below). Only repository paths, never URLs.
+- A record may carry extra fields a project defines (for example an import audit reference); keep them untouched.
+
+### Who changes what
+
+- An agent changes only the tasks it works on: its own new records and the task it took. Moving a task out of `review` (back to `to-do` or `in_progress`), reopening a `done` task, cancelling or removing a task, and changing another agent's task are the user's decisions: do it only when the user asks for it explicitly, and say so in `result`. A task the user put back to `to-do` with comments is picked up again through the comments, not by silently continuing the old work.
+- `done` is set by the user, or by an agent after the user's explicit acceptance in this conversation, together with `completed_at` and the commit hash.
+- Milestones are created by agents when no existing one covers the request (see above); renaming, reprioritising or deleting milestones and rewriting other people's descriptions is the user's call.
 
 ### Statuses, results, commits
 
 - After every change to a task refresh `updated_at`. When finished, write a short `result`: what was done, how it was verified, what remains. `done` requires `completed_at`, the real branch and the commit hash if that commit already exists; otherwise `commit: null`. Never invent a hash and never commit just to fill the field. `review` means the result still needs the user's acceptance; `to-do` means not started.
 - **Finishing work moves the task to `review`, not `done`, and creates no commit**: leave the changes in the working tree, write `result` and wait for the user to check the outcome and explicitly allow a commit and/or `done`. The commit rules below apply only after that permission; `done` without the user's explicit consent is not allowed. When resuming a task, clear the old `completed_at` and explain why in `result`. If a resumed record lives in `.trackfile/archive.md`, move it back to `TRACKFILE.md` (cut it out of the archive, drop `archived_at`, append it to the end of `## Tasks`) — an open task never stays in the archive; agents never move records into the archive, the dashboard does that.
 - **The task number goes into the commit and into the code.** A commit is created only after the user's explicit permission. The commit subject starts with the numbers of every affected task (`#134 #135: …`); a commit without a task number is not created, just like a change without a task. The same number goes into the code: a changed or added block of logic gets a comment `// #NNN: why it is done this way` (in the project's style — the reason, not a paraphrase of the code; `# #NNN: …` or the language's own comment syntax where `//` does not exist); one comment per coherent change, not per line. Mechanical edits (renames, formatting) need no comment, but the number in the commit is mandatory for them too. After the commit, write its hash into the task's `commit` field.
-- **Documents and tasks link both ways.** When changing documentation (docs, READMEs, ADRs, specs) within a known task, mark the changed or added paragraphs, list items or table rows with a link at the end of the line: `[#NNN](<relative path to>TRACKFILE.md#task-NNN)` (from `docs/` — `../TRACKFILE.md#task-NNN`). Several tasks — several links in a row; in a table row the mark goes inside the last cell; no marks inside code blocks. If the user asks to file a task and change documentation, both links are made at once: the document's path goes into the task's `sources`, the `#task-NNN` mark into the document. The dashboard's reader uses these marks to highlight every mention of a task.
+- **Documents and tasks link both ways.** When changing documentation (docs, READMEs, ADRs, specs) within a known task, mark the changed or added paragraphs, list items or table rows with a link at the end of the line: `[#NNN](<relative path to>TRACKFILE.md#task-NNN)` (from `docs/` — `../TRACKFILE.md#task-NNN`). Several tasks — several links in a row; in a table row the mark goes inside the last cell; no marks inside code blocks. Both links are made at once, never "later": the document's path goes into the task's `sources`, the `#task-NNN` mark into the document. The same applies to code: changed files go into `sources` and the changed logic carries the `// #NNN:` comment. The dashboard's reader uses these marks to highlight every mention of a task, so an unmarked change is invisible to the next reader.
 
 ### Editing safely
 
