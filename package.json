@@ -1,6 +1,6 @@
 {
   "name": "trackfile",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Git-native task tracker for humans and coding agents. Tasks live in Markdown next to your code; every edit is a commit.",
   "keywords": ["task-tracker", "issue-tracker", "markdown", "git", "project-management", "ai-agents", "claude-code", "codex", "local-first"],
   "homepage": "https://github.com/firuz1844/trackfile#readme",

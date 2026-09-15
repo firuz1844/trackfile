@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Protocol: field semantics (`author` is the record's author, `created_at` never changes, `sources` as mandatory evidence for a `review` result), "who changes what" (leaving `review`, reopening, cancelling and other people's tasks are the user's decisions), back-links extended to code.
+- `trackfile init --force` reinstalls agent rules even at the same version.
+
 ## 0.1.0 — first release
 
 - `TRACKFILE.md` + `.trackfile/` layout, discovered upwards from the current directory; secondary paths configurable in the front matter, the registry name with `--registry`.
