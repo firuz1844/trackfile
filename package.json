@@ -1,17 +1,50 @@
 {
   "name": "trackfile",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Git-native task tracker for humans and coding agents. Tasks live in Markdown next to your code; every edit is a commit.",
-  "keywords": ["task-tracker", "issue-tracker", "markdown", "git", "project-management", "ai-agents", "claude-code", "codex", "local-first"],
+  "keywords": [
+    "task-tracker",
+    "issue-tracker",
+    "markdown",
+    "git",
+    "project-management",
+    "ai-agents",
+    "claude-code",
+    "codex",
+    "local-first"
+  ],
   "homepage": "https://github.com/firuz1844/trackfile#readme",
-  "bugs": { "url": "https://github.com/firuz1844/trackfile/issues" },
-  "repository": { "type": "git", "url": "git+https://github.com/firuz1844/trackfile.git" },
+  "bugs": {
+    "url": "https://github.com/firuz1844/trackfile/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/firuz1844/trackfile.git"
+  },
   "license": "MIT",
   "author": "Firuz Narzikulov",
-  "bin": { "trackfile": "bin/trackfile.js" },
+  "bin": {
+    "trackfile": "bin/trackfile.js"
+  },
   "main": "lib/serve.cjs",
-  "files": ["bin", "lib", "app", "skill", "templates", "README.md", "CHANGELOG.md", "LICENSE"],
-  "scripts": { "test": "node --test tests/*.test.cjs", "test:browser": "node tests/browser.cjs" },
-  "engines": { "node": ">=18" },
-  "publishConfig": { "access": "public" }
+  "files": [
+    "bin",
+    "lib",
+    "app",
+    "skill",
+    "templates",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "test:browser": "node tests/browser.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

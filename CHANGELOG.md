@@ -11,6 +11,13 @@
 - The auto-archive cutoff (previously a fixed week) is now a project-wide setting (`archive_after_days` in the registry's front matter), editable from a new "Auto-archive" dialog under Settings.
 - Model, i18n and layout tests for all of the above.
 
+## [0.2.0](https://github.com/firuz1844/trackfile/compare/trackfile-v0.1.1...trackfile-v0.2.0) (2026-09-17)
+
+
+### Features
+
+* Labels UI overhaul, unified filter bar, sidebar polish, archiving ([7bd2c60](https://github.com/firuz1844/trackfile/commit/7bd2c60f19423a1b936a65898914b3f1b3f2619a))
+
 ## 0.1.1
 
 - Protocol: field semantics (`author` is the record's author, `created_at` never changes, `sources` as mandatory evidence for a `review` result), "who changes what" (leaving `review`, reopening, cancelling and other people's tasks are the user's decisions), back-links extended to code.
