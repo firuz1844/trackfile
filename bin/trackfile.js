@@ -12,6 +12,8 @@ Usage:
   trackfile [serve] [--open] [--port N] [--registry FILE]   start the dashboard (default command)
   trackfile init [--name NAME] [--agents LIST] [--global] [--force] [--dry-run] [--launch]
   trackfile toc [--closed] [--all] [--registry FILE]         table of contents for agents
+  trackfile migrate --shared [--branch NAME] [--remote NAME] [--local] [--dry-run] [--task ID]
+  trackfile migrate --rollback [--dry-run]
   trackfile --help | --version
 
 serve:
@@ -26,6 +28,15 @@ init:
   --force           update already installed agent rules to this version
   --dry-run         print what would be created, write nothing
   --launch          add the dashboard to .claude/launch.json
+
+migrate:
+  --shared          move the registry/archive/tasks into a dedicated data branch (default: trackfile)
+  --branch NAME     data branch name (default: trackfile)
+  --remote NAME     remote to push the data branch to (default: origin)
+  --local           do not push the data branch — single-clone setups only
+  --task ID         prefix the migration commits with #ID, like any other trackfile edit
+  --dry-run         print the plan, write nothing
+  --rollback        undo a migration: restore data files, drop the pointer and worktree
 `;
 
 function parse(argv) {
@@ -34,7 +45,7 @@ function parse(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) { opts._.push(a); continue; }
     const [key, inline] = a.slice(2).split('=');
-    const needsValue = ['port', 'registry', 'name', 'agents'].includes(key);
+    const needsValue = ['port', 'registry', 'name', 'agents', 'branch', 'remote', 'task', 'absorb'].includes(key);
     opts[key] = needsValue ? (inline ?? argv[++i]) : true;
   }
   return opts;
@@ -72,6 +83,14 @@ async function main() {
       agents = (answer.trim() === '' ? 'claude,codex' : answer).split(',').map(s => s.trim()).filter(s => s && s !== 'none');
     }
     init.run({ name: opts.name, agents: agents ?? [], global: Boolean(opts.global), force: Boolean(opts.force), dryRun: Boolean(opts['dry-run']), launch: Boolean(opts.launch) });
+    return;
+  }
+  if (command === 'migrate') {
+    if (!opts.shared && !opts.rollback && !opts.absorb) { console.error(`Usage: trackfile migrate --shared | --rollback | --absorb BRANCH\n\n${HELP}`); process.exit(2); }
+    const migrate = require('../lib/migrate.cjs');
+    try {
+      await migrate.run({ branch: opts.branch || 'trackfile', remote: opts.remote || 'origin', local: Boolean(opts.local), history: Boolean(opts.history), push: Boolean(opts.push), dryRun: Boolean(opts['dry-run']), rollback: Boolean(opts.rollback), absorb: opts.absorb || null, task: opts.task || null });
+    } catch (error) { console.error(error.message); process.exit(1); }
     return;
   }
   console.error(`Unknown command: ${command}\n\n${HELP}`); process.exit(2);
