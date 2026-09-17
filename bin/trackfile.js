@@ -16,6 +16,12 @@ Usage:
   trackfile migrate --rollback [--dry-run]
   trackfile check [--registry FILE]                          validate registry/archive invariants
   trackfile merge-driver %O %A %B [%P]                       git merge driver (registered automatically)
+  trackfile new TITLE [--parent ID] [--milestone ID] [--body TEXT] [--marker NAME]
+  trackfile take ID [--marker NAME]
+  trackfile set ID FIELD VALUE [--marker NAME] [--acknowledge]
+  trackfile comment ID TEXT [--marker NAME] [--acknowledge]
+  trackfile sync [--marker NAME]
+  trackfile status [--marker NAME]
   trackfile --help | --version
 
 serve:
@@ -47,7 +53,7 @@ function parse(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) { opts._.push(a); continue; }
     const [key, inline] = a.slice(2).split('=');
-    const needsValue = ['port', 'registry', 'name', 'agents', 'branch', 'remote', 'task', 'absorb'].includes(key);
+    const needsValue = ['port', 'registry', 'name', 'agents', 'branch', 'remote', 'task', 'absorb', 'marker', 'parent', 'milestone', 'body'].includes(key);
     opts[key] = needsValue ? (inline ?? argv[++i]) : true;
   }
   return opts;
@@ -92,6 +98,45 @@ async function main() {
     const migrate = require('../lib/migrate.cjs');
     try {
       await migrate.run({ branch: opts.branch || 'trackfile', remote: opts.remote || 'origin', local: Boolean(opts.local), history: Boolean(opts.history), push: Boolean(opts.push), dryRun: Boolean(opts['dry-run']), rollback: Boolean(opts.rollback), absorb: opts.absorb || null, task: opts.task || null });
+    } catch (error) { console.error(error.message); process.exit(1); }
+    return;
+  }
+  const AGENT_COMMANDS = new Set(['new', 'take', 'set', 'comment', 'sync', 'status']);
+  if (AGENT_COMMANDS.has(command)) {
+    const commands = require('../lib/commands.cjs');
+    const marker = opts.marker || process.env.TRACKFILE_AGENT || require('node:os').userInfo().username;
+    const layout = layoutFor(opts);
+    try {
+      if (command === 'new') {
+        const title = opts._[1];
+        if (!title) { console.error('Usage: trackfile new TITLE [--parent ID] [--milestone ID] [--body TEXT] [--marker NAME]'); process.exit(2); }
+        const result = await commands.newTask(layout, { title, parent: opts.parent || null, milestone: opts.milestone || null, body: opts.body || '', marker, log: console.log });
+        console.log(`#${result.id}`);
+      } else if (command === 'take') {
+        const id = opts._[1];
+        if (!id) { console.error('Usage: trackfile take ID [--marker NAME]'); process.exit(2); }
+        const result = await commands.take(layout, id, { marker, log: console.log });
+        console.log(result.applied ? `#${id} taken by ${marker}${result.pushed ? '' : ' (queued — remote unreachable)'}` : `#${id}: nothing to change.`);
+      } else if (command === 'set') {
+        const [, id, field, value] = opts._;
+        if (!id || !field || value === undefined) { console.error('Usage: trackfile set ID FIELD VALUE [--marker NAME] [--acknowledge]'); process.exit(2); }
+        const result = await commands.setField(layout, id, field, value, { marker, acknowledge: Boolean(opts.acknowledge), log: console.log });
+        console.log(result.applied ? `#${id}: ${field} = ${value}` : `#${id}: nothing to change.`);
+      } else if (command === 'comment') {
+        const [, id, ...rest] = opts._;
+        const text = rest.join(' ');
+        if (!id || !text) { console.error('Usage: trackfile comment ID TEXT [--marker NAME] [--acknowledge]'); process.exit(2); }
+        await commands.comment(layout, id, text, { marker, acknowledge: Boolean(opts.acknowledge), log: console.log });
+        console.log(`#${id}: comment added.`);
+      } else if (command === 'sync') {
+        const result = await commands.sync(layout, { marker, log: console.log });
+        console.log(result.clean ? 'Nothing to sync.' : result.pushed ? `Synced (${result.commit.slice(0, 8)}).` : `Committed locally, queued (${result.unpushedCount} unpushed) — remote unreachable.`);
+      } else if (command === 'status') {
+        const result = await commands.status(layout, { marker });
+        console.log(`Unpushed commits: ${result.unpushed}`);
+        console.log(`Data worktree: ${result.dirty ? 'dirty (run trackfile sync)' : 'clean'}`);
+        if (result.ownTask) console.log(`Your task: #${result.ownTask}${result.drift ? ` — changed since take:\n${result.drift.changes.map(c => `  - ${c}`).join('\n')}` : ' (unchanged since take)'}`);
+      }
     } catch (error) { console.error(error.message); process.exit(1); }
     return;
   }
