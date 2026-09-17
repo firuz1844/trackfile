@@ -11,6 +11,13 @@
 - The auto-archive cutoff (previously a fixed week) is now a project-wide setting (`archive_after_days` in the registry's front matter), editable from a new "Auto-archive" dialog under Settings.
 - Model, i18n and layout tests for all of the above.
 
+## [0.2.1](https://github.com/firuz1844/trackfile/compare/trackfile-v0.2.0...trackfile-v0.2.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* configure git identity in publish job before running tests ([ab3fe40](https://github.com/firuz1844/trackfile/commit/ab3fe40cf768ace9e3859b8dc9c6d48201c49d7c))
+
 ## [0.2.0](https://github.com/firuz1844/trackfile/compare/trackfile-v0.1.1...trackfile-v0.2.0) (2026-09-17)
 
 
