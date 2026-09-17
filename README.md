@@ -114,10 +114,29 @@ short; its core is:
 ## The dashboard
 
 Pages: dashboard (milestone progress, pinned tasks, recent changes), task tree with search, multi-status and
-milestone filters, milestone pages (progress, description, the milestone's own tree), task pages (description,
-result, sources, subtasks, files, comments), a source reader and commit pages. Every page-level move is a
-browser history entry with a deep link: `#tree`, `#task/042`, `#task/042/comment/3`, `#milestone/M02`,
-`#source/docs/design.md`, `#commit/<hash>`.
+milestone filters, a **Relationship diagram**, milestone pages (progress, description, the milestone's own
+tree), task pages (description, result, sources, dependencies, labels, subtasks, files, comments), a source
+reader and commit pages. Every page-level move is a browser history entry with a deep link: `#tree`,
+`#diagram`, `#task/042`, `#task/042/comment/3`, `#milestone/M02`, `#source/docs/design.md`, `#commit/<hash>`.
+
+**Dependencies and labels.** A task's context menu offers **Relationships** (a search filter, a Blocked
+by/Blocking/Relates to switch, and a checklist of every other task, staged and applied on Save; "Blocked by" —
+a Finish-Start blocking link with a warning chip on any task waiting on an open blocker; "Blocking" — its
+reverse, picked from the same task; "Relates to" — a non-blocking, non-hierarchical link; a task that would
+directly block one already blocking it is disabled in the list, and any longer blocking cycle is rejected on
+save) and **Labels**, a searchable checklist of every label (colored chips,
+preset palette or a custom color) with an inline "Create label" row. Its "Manage labels" button, also reachable
+from the sidebar's **Settings** menu, opens a dialog to edit or delete any label (with a warning naming how
+many tasks lose it). `trackfile init` seeds a default set of labels (bug, enhancement, documentation, question,
+wontfix); an older registry that predates labels gets the same default set the first time **Labels** or
+**Manage labels** is opened on it, so a project never shows an empty list, but nothing changes on disk until
+you actually look. A task page lists its Blocked by/Blocking/Related tasks with a trash icon on each entry to
+drop that one link without opening the dialog. Dependencies and labels are editable at any status, unlike
+title/description/parent. The
+**Relationship diagram** page draws
+parent/child, blocking and "relates to" links as a small graph (dashed/solid/dotted lines, a legend, click a
+node to open it), centered on the whole registry or one task, with a status filter, an edge-type toggle and a
+node cap (dim or hide whatever the filters exclude) so a large registry stays readable.
 
 Tasks are created with **New task** / **Subtask** (an existing task can be made a subtask too); title,
 description, parent and milestone are editable only while the task is `to-do` with no assignee — everything
@@ -147,10 +166,13 @@ deleted lines red where they were.
 **Commit pages.** A task's commit hash links to a page with the message (task numbers linked), author, date,
 parents, tasks that reference the commit, the file list and a unified diff per file.
 
-**Archive.** On load, closed tasks (`done`/`cancelled`/`removed`) older than seven days move from
-`TRACKFILE.md` to `.trackfile/archive.md` in one write and one commit (`#001 #002 [auto archive]: …`); a
+**Archive.** On load, closed tasks (`done`/`cancelled`/`removed`) older than a cutoff (seven days by default,
+`archive_after_days` under Settings → **Auto-archive**, project-wide via the registry's front matter) move
+from `TRACKFILE.md` to `.trackfile/archive.md` in one write and one commit (`#001 #002 [auto archive]: …`); a
 feature with open subtasks stays. **Archive** / **Unarchive** move a task by hand in either direction; a
-task returned by hand is left alone until its status changes; reopening an archived task returns it
+finished task can still have finished subtasks sitting in the registry (the dashboard never archives them on
+its own), so a manual archive with such subtasks offers to sweep the whole closed subtree in the same commit.
+A task returned by hand is left alone until its status changes; reopening an archived task returns it
 automatically. Archived tasks are hidden in the tree until **Show archive** is ticked and never count
 differently in progress. Agents never archive: they set `done`, the dashboard moves the record.
 
@@ -181,7 +203,9 @@ next_task: 43
 ```
 
 `next_task` is a monotonic counter strictly greater than every existing ID; task IDs have at least three
-digits, milestone IDs are `M` plus at least two digits; IDs are never reused. The file has a `## Milestones`
+digits, milestone IDs are `M` plus at least two digits; IDs are never reused. An optional `archive_after_days`
+(a non-negative integer) overrides the default seven-day auto-archive cutoff for the whole project; the
+dashboard writes it from Settings → **Auto-archive**. The file has a `## Milestones`
 section and a `## Tasks` section (the section names are free — the parser only uses `## ` headings as
 boundaries); each record is an exact heading followed immediately by a `yaml` fence:
 
@@ -212,6 +236,9 @@ branch: null
 commit: null
 result: ""
 sources: ["docs/design.md"]
+blocked_by: ["038"]
+relates_to: ["051"]
+labels: ["L01"]
 ```
 
 Description in Markdown. `#`, `##`, `###` are reserved for the structure — use `####` or plain text.
@@ -230,10 +257,31 @@ Description in Markdown. `#`, `##`, `###` are reserved for the structure — use
 | `branch`, `commit` | The real branch and an existing implementation commit, or `null` |
 | `result` | What was done, how it was verified, what remains |
 | `sources` | Repository-relative paths to documents and code backing the status; Markdown documents in this list carry back-link marks |
+| `blocked_by` | Optional array of task IDs that must finish before this one (a Finish-Start blocking dependency); a blocking cycle is a format error. The reverse "blocks" view and the "relates to" view are derived, never stored twice |
+| `relates_to` | Optional array of task IDs for a non-blocking, non-hierarchical link; recorded on either side, shown on both |
+| `labels` | Optional array of `Lxx` label IDs (see `LABEL` records below) |
 | `priority` (milestones) | `low` / `normal` / `high`; absent means `normal` |
 
 Progress = `done / leaf active tasks`: a leaf is a record without children; `cancelled`/`removed` records and
 all their descendants are excluded; `review` is not `done`; archived tasks count like active ones.
+
+**Labels** are records in an optional `## Labels` section, next to `## Milestones`:
+
+````markdown
+### LABEL L01
+```yaml
+id: "L01"
+title: "Bug"
+color: "#ef4444"
+```
+````
+
+`id` is `L` plus at least two digits, `color` a `"#rrggbb"` hex string (the dashboard offers a preset palette
+and a color picker); a task references labels by ID in its `labels` array. Labels live only in the registry,
+never in the archive. A brand-new registry (`trackfile init`) gets the same default set — bug, enhancement,
+documentation, question, wontfix — that an older registry with no `## Labels` section gets seeded with the
+first time the dashboard's Labels or Manage labels dialog is opened on it (an empty `## Labels` section is
+left alone: the project already opted out of the defaults).
 
 **Comments** live in `.trackfile/tasks/NNN/comments.md`, never in the registry (a `#### COMMENT` inside a
 record is a format error). The file holds only numbered blocks; numbers grow from 1 and are never reused, so

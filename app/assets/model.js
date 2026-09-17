@@ -6,6 +6,18 @@
   'use strict';
   const statuses = ['to-do', 'in_progress', 'review', 'done', 'cancelled', 'removed'];
   const priorities = ['low', 'normal', 'high'];
+  const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+  // A small preset palette the UI offers first; a label's color may also be any other hex value.
+  const presetColors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899', '#64748b'];
+  // Seeded once, either into a brand-new registry (templates/TRACKFILE.md) or into an old one migrating to
+  // have labels for the first time (see addLabel below), so a project never starts with an empty label list.
+  const defaultLabels = [
+    { title: 'bug', color: '#ef4444' },
+    { title: 'enhancement', color: '#3b82f6' },
+    { title: 'documentation', color: '#14b8a6' },
+    { title: 'question', color: '#8b5cf6' },
+    { title: 'wontfix', color: '#64748b' },
+  ];
   const priorityOf = m => m.priority ?? 'normal';
   const inactive = new Set(['cancelled', 'removed']);
   // Closed statuses are archive candidates; comments live in a per-task file, never inside the registry.
@@ -36,13 +48,14 @@
     yaml_block: '{id} needs a yaml block right after its heading.',
     id_title: 'Invalid id/title for {id}.',
     comments_in_registry: '{id}: comments are stored in {file}, not in the registry.',
-    milestone_in_archive: '{file}: milestones live only in the registry.',
+    milestone_in_archive: '{file}: milestones and labels live only in the registry.',
     no_registry: 'No registry file.',
     duplicate_id: 'Invalid or duplicate ID: {id}',
     unknown_file: 'Unknown registry file: {file}',
     comments_orphan: '{file}: task {id} is neither in the registry nor in the archive.',
     priority: '{id}: priority must be one of {values}.',
     next_task: 'next_task must exceed every existing ID.',
+    archive_after_days: 'archive_after_days must be a non-negative integer.',
     status: 'Unknown status for {id}.',
     kind: 'Invalid kind for {id}.',
     field_required: '{id}: field {field} is required.',
@@ -59,6 +72,14 @@
     sources: '{id}: sources must be an array of strings.',
     result: '{id}: result must be a string.',
     cycle: 'Parent cycle: {id}',
+    dependency_format: '{id}: {field} must be an array of unique task IDs.',
+    dependency_self: '{id}: {field} cannot reference the task itself.',
+    dependency_missing: '{id}: {field} references unknown task {ref}.',
+    dependency_cycle: 'Blocking cycle: {id}',
+    label_format: '{id}: labels must be an array of unique label IDs.',
+    label_missing: '{id}: labels reference unknown label {ref}.',
+    label_color: 'Invalid label color (expected \"#rrggbb\"): {color}',
+    label_not_found: 'Label not found: {id}',
     reserved_headings: 'Use #### headings or plain text in descriptions; #–### headings are reserved.',
     parent_unavailable: 'Parent is missing, cancelled or removed.',
     parent_archived: 'Parent is archived: unarchive it first.',
@@ -136,26 +157,26 @@
     const meta = yaml(front[1]);
     if (meta.schema !== 1 || typeof meta.project !== 'string') fail('schema', { file });
     if (archive ? meta.archive !== true : !Number.isSafeInteger(meta.next_task)) archive ? fail('archive_flag', { file }) : fail('next_task_missing');
-    const headings = [...text.matchAll(/^### (TASK|MILESTONE) ([A-Za-z0-9-]+)[ \t]*$/gm)];
+    const headings = [...text.matchAll(/^### (TASK|MILESTONE|LABEL) ([A-Za-z0-9-]+)[ \t]*$/gm)];
     if ([...text.matchAll(/^### .+$/gm)].length !== headings.length) fail('headings');
-    const tasks = [], milestones = [];
+    const tasks = [], milestones = [], labels = [];
     for (let i = 0; i < headings.length; i++) {
       const h = headings[i], start = h.index;
       let end = headings[i + 1]?.index ?? text.length;
       const section = /^## /m.exec(text.slice(start + h[0].length, end));
       if (section) end = start + h[0].length + section.index;
       const raw = text.slice(start, end);
-      const block = /^### (?:TASK|MILESTONE) [A-Za-z0-9-]+[ \t]*\n```yaml\n([\s\S]*?)\n```\n?/.exec(raw);
+      const block = /^### (?:TASK|MILESTONE|LABEL) [A-Za-z0-9-]+[ \t]*\n```yaml\n([\s\S]*?)\n```\n?/.exec(raw);
       if (!block) fail('yaml_block', { id: h[2] });
       const data = yaml(block[1]);
       if (data.id !== h[2] || typeof data.title !== 'string' || !data.title.trim()) fail('id_title', { id: h[2] });
       const body = raw.slice(block[0].length).trim();
       if (h[1] === 'TASK' && /^#### COMMENT \d+/m.test(body)) fail('comments_in_registry', { id: h[2], file: label(commentsFile(h[2])) });
-      if (h[1] === 'MILESTONE' && archive) fail('milestone_in_archive', { file });
+      if (h[1] !== 'TASK' && archive) fail('milestone_in_archive', { file });
       const entry = { ...data, body, comments: [], start, end, raw, data, file: name, archived: archive };
-      (h[1] === 'TASK' ? tasks : milestones).push(entry);
+      (h[1] === 'TASK' ? tasks : h[1] === 'MILESTONE' ? milestones : labels).push(entry);
     }
-    return { text, meta, frontLength: front[0].length, tasks, milestones };
+    return { text, meta, frontLength: front[0].length, tasks, milestones, labels };
   }
   // Input: the registry text alone, or a map {registry, archive?, 'comments/NNN'…}; tasks of both files form
   // one tree and each comments file is attached to its task.
@@ -164,7 +185,7 @@
     if (files[REGISTRY] == null) fail('no_registry');
     const project = parseRegistry(files[REGISTRY], REGISTRY);
     const archive = files[ARCHIVE] != null ? parseRegistry(files[ARCHIVE], ARCHIVE) : null;
-    const { meta, milestones } = project;
+    const { meta, milestones, labels } = project;
     const tasks = [...project.tasks, ...(archive?.tasks ?? [])];
     files[REGISTRY] = project.text; if (archive) files[ARCHIVE] = archive.text;
     const unique = (items, pattern) => {
@@ -175,7 +196,7 @@
       }
       return map;
     };
-    const byId = unique(tasks, /^\d{3,}$/), byMilestone = unique(milestones, /^M\d{2,}$/);
+    const byId = unique(tasks, /^\d{3,}$/), byMilestone = unique(milestones, /^M\d{2,}$/), byLabel = unique(labels, /^L\d{2,}$/);
     for (const [name, content] of Object.entries(files)) {
       const m = COMMENTS_FILE.exec(name);
       if (!m) { if (name !== REGISTRY && name !== ARCHIVE) fail('unknown_file', { file: name }); continue; }
@@ -186,7 +207,9 @@
     }
     // Milestone priority is optional: absent means normal, anything else is a format error.
     for (const m of milestones) if (m.priority !== undefined && !priorities.includes(m.priority)) fail('priority', { id: m.id, values: priorities.join('/') });
+    for (const l of labels) if (!HEX_COLOR.test(l.color)) fail('label_color', { id: l.id, color: l.color });
     if (meta.next_task <= Math.max(0, ...tasks.map(t => Number(t.id)))) fail('next_task');
+    if (meta.archive_after_days !== undefined && !(Number.isSafeInteger(meta.archive_after_days) && meta.archive_after_days >= 0)) fail('archive_after_days');
     for (const t of tasks) {
       if (!statuses.includes(t.status)) fail('status', { id: t.id });
       if (!['feature', 'task'].includes(t.kind)) fail('kind', { id: t.id });
@@ -205,6 +228,16 @@
       if (t.milestone !== null && !byMilestone.has(t.milestone)) fail('milestone_missing', { id: t.id });
       if (t.sources !== undefined && (!Array.isArray(t.sources) || !t.sources.every(s => typeof s === 'string'))) fail('sources', { id: t.id });
       if (t.result !== undefined && typeof t.result !== 'string') fail('result', { id: t.id });
+      for (const field of ['blocked_by', 'relates_to']) {
+        if (t[field] === undefined) continue;
+        if (!Array.isArray(t[field]) || !t[field].every(s => typeof s === 'string') || new Set(t[field]).size !== t[field].length) fail('dependency_format', { id: t.id, field });
+        if (t[field].includes(t.id)) fail('dependency_self', { id: t.id, field });
+        for (const ref of t[field]) if (!byId.has(ref)) fail('dependency_missing', { id: t.id, field, ref });
+      }
+      if (t.labels !== undefined) {
+        if (!Array.isArray(t.labels) || !t.labels.every(s => typeof s === 'string') || new Set(t.labels).size !== t.labels.length) fail('label_format', { id: t.id });
+        for (const ref of t.labels) if (!byLabel.has(ref)) fail('label_missing', { id: t.id, ref });
+      }
       const seen = new Set([t.id]);
       let p = t.parent;
       while (p) {
@@ -212,7 +245,18 @@
         seen.add(p); p = byId.get(p)?.parent;
       }
     }
-    return { files, text: project.text, meta, frontLength: project.frontLength, archive: archive ? { text: archive.text, meta: archive.meta, frontLength: archive.frontLength } : null, tasks, milestones, byId, byMilestone };
+    // A blocked_by cycle would make every task in it impossible to ever unblock.
+    { const state = new Map();
+      const visit = id => {
+        if (state.get(id) === 1) return;
+        if (state.get(id) === 0) fail('dependency_cycle', { id });
+        state.set(id, 0);
+        for (const dep of byId.get(id).blocked_by ?? []) visit(dep);
+        state.set(id, 1);
+      };
+      for (const t of tasks) visit(t.id);
+    }
+    return { files, text: project.text, meta, frontLength: project.frontLength, archive: archive ? { text: archive.text, meta: archive.meta, frontLength: archive.frontLength } : null, tasks, milestones, labels, byId, byMilestone, byLabel };
   }
   // Mutations return the set of changed files {name: text | null (delete)}; apply() yields the document after them.
   function apply(doc, changes) {
@@ -248,14 +292,18 @@
   }
   // Fresh settings show recently changed tasks first; an empty status list means "all statuses";
   // milestone pages store the collapsed nodes because everything is expanded by default there.
-  const defaults = () => ({ schema: 1, view: 'dashboard', expanded: [], selected: null, selectedMilestone: null, search: '', statuses: [], milestone: 'all', sort: 'updated', milestoneStatuses: [], milestoneSort: 'updated', milestoneCollapsed: [], hideArchived: false, hideDone: false, showArchive: false, pinnedTasks: [], pinnedMilestones: [], theme: 'light', sidebarCollapsed: false, lang: null });
+  const edgeTypes = ['parent', 'blocked_by', 'relates_to'];
+  const diagramFilteredModes = ['dim', 'hide'];
+  const sortFields = ['id', 'created', 'updated', 'completed'];
+  const defaults = () => ({ schema: 1, view: 'dashboard', expanded: [], selected: null, selectedMilestone: null, search: '', statuses: [], milestone: 'all', labels: [], authors: [], assignees: [], sort: 'updated', sortDir: 'desc', milestoneStatuses: [], milestoneLabels: [], milestoneAuthors: [], milestoneAssignees: [], milestoneSort: 'updated', milestoneSortDir: 'desc', milestoneCollapsed: [], hideArchived: false, hideDone: false, showArchive: false, pinnedTasks: [], pinnedMilestones: [], theme: 'light', sidebarCollapsed: false, lang: null,
+    diagramRoot: null, diagramLimit: 60, diagramRelationships: [], diagramStatuses: [], diagramMilestones: [], diagramFilteredMode: 'dim', diagramHideIsolated: true, diagramShowNames: false, diagramShowLabels: false, diagramZoom: 1 });
   const complete = p => p.total > 0 && p.done === p.total;
   function cleanConfig(value, doc) {
     const c = defaults();
     if (!value || value.schema !== 1) return c;
     c.expanded = [...new Set((Array.isArray(value.expanded) ? value.expanded : []).filter(id => doc.byId.has(id)))];
     c.selected = doc.byId.has(value.selected) ? value.selected : null;
-    c.view = ['dashboard', 'tree', 'task', 'milestone'].includes(value.view) ? value.view : c.view;
+    c.view = ['dashboard', 'tree', 'task', 'milestone', 'diagram'].includes(value.view) ? value.view : c.view;
     if (c.view === 'task' && !c.selected) c.view = 'tree';
     // The milestone page is its own view; without an existing milestone it falls back to the dashboard.
     c.selectedMilestone = doc.byMilestone.has(value.selectedMilestone) ? value.selectedMilestone : null;
@@ -263,10 +311,20 @@
     const legacyStatuses = statuses.includes(value.status) ? [value.status] : [];
     c.statuses = [...new Set((Array.isArray(value.statuses) ? value.statuses : legacyStatuses).filter(status => statuses.includes(status)))];
     c.milestone = value.milestone === 'none' || doc.byMilestone.has(value.milestone) ? value.milestone : 'all';
+    c.labels = [...new Set((Array.isArray(value.labels) ? value.labels : []).filter(id => doc.byLabel.has(id)))];
+    const validAuthors = new Set(doc.tasks.map(t => t.author).filter(Boolean));
+    c.authors = [...new Set((Array.isArray(value.authors) ? value.authors : []).filter(a => validAuthors.has(a)))];
+    const validAssignees = new Set(doc.tasks.map(t => t.assignee).filter(Boolean));
+    c.assignees = [...new Set((Array.isArray(value.assignees) ? value.assignees : []).filter(a => a === 'none' || validAssignees.has(a)))];
     c.search = typeof value.search === 'string' ? value.search.slice(0, 500) : '';
-    c.sort = ['id', 'updated'].includes(value.sort) ? value.sort : c.sort;
+    c.sort = sortFields.includes(value.sort) ? value.sort : c.sort;
+    c.sortDir = ['asc', 'desc'].includes(value.sortDir) ? value.sortDir : c.sortDir;
     c.milestoneStatuses = [...new Set((Array.isArray(value.milestoneStatuses) ? value.milestoneStatuses : []).filter(status => statuses.includes(status)))];
-    c.milestoneSort = ['id', 'updated'].includes(value.milestoneSort) ? value.milestoneSort : c.milestoneSort;
+    c.milestoneLabels = [...new Set((Array.isArray(value.milestoneLabels) ? value.milestoneLabels : []).filter(id => doc.byLabel.has(id)))];
+    c.milestoneAuthors = [...new Set((Array.isArray(value.milestoneAuthors) ? value.milestoneAuthors : []).filter(a => validAuthors.has(a)))];
+    c.milestoneAssignees = [...new Set((Array.isArray(value.milestoneAssignees) ? value.milestoneAssignees : []).filter(a => a === 'none' || validAssignees.has(a)))];
+    c.milestoneSort = sortFields.includes(value.milestoneSort) ? value.milestoneSort : c.milestoneSort;
+    c.milestoneSortDir = ['asc', 'desc'].includes(value.milestoneSortDir) ? value.milestoneSortDir : c.milestoneSortDir;
     c.milestoneCollapsed = [...new Set((Array.isArray(value.milestoneCollapsed) ? value.milestoneCollapsed : []).filter(id => doc.byId.has(id)))];
     c.hideArchived = value.hideArchived === true;
     c.hideDone = value.hideDone === true;
@@ -277,6 +335,16 @@
     c.sidebarCollapsed = value.sidebarCollapsed === true;
     // UI language override; null means "follow the browser".
     c.lang = ['en', 'ru'].includes(value.lang) ? value.lang : null;
+    c.diagramRoot = doc.byId.has(value.diagramRoot) ? value.diagramRoot : null;
+    c.diagramLimit = Number.isInteger(value.diagramLimit) && value.diagramLimit > 0 ? Math.min(value.diagramLimit, 500) : c.diagramLimit;
+    c.diagramRelationships = [...new Set((Array.isArray(value.diagramRelationships) ? value.diagramRelationships : []).filter(x => edgeTypes.includes(x)))];
+    c.diagramStatuses = [...new Set((Array.isArray(value.diagramStatuses) ? value.diagramStatuses : []).filter(status => statuses.includes(status)))];
+    c.diagramMilestones = [...new Set((Array.isArray(value.diagramMilestones) ? value.diagramMilestones : []).filter(id => doc.byMilestone.has(id)))];
+    c.diagramFilteredMode = diagramFilteredModes.includes(value.diagramFilteredMode) ? value.diagramFilteredMode : c.diagramFilteredMode;
+    c.diagramHideIsolated = value.diagramHideIsolated !== false;
+    c.diagramShowNames = value.diagramShowNames === true;
+    c.diagramShowLabels = value.diagramShowLabels === true;
+    c.diagramZoom = typeof value.diagramZoom === 'number' && value.diagramZoom > 0 ? Math.min(2.5, Math.max(0.4, value.diagramZoom)) : c.diagramZoom;
     return c;
   }
   function record(type, data, body) {
@@ -411,6 +479,159 @@
     if (t.parent === parent) return {};
     return commit(doc, [{ file: t.file, start: t.start, end: t.end, replacement: record('TASK', { ...t.data, parent, updated_at: now }, t.body) }]);
   }
+  // Dependency links (like milestone/parent) are editable in any status; format, existence, self-reference
+  // and blocking cycles are all caught by parse() when commit() re-validates the result.
+  function setDependencies(doc, id, { blockedBy, relatesTo } = {}, now = new Date().toISOString()) {
+    const t = doc.byId.get(id);
+    if (!t) fail('task_not_found', { id });
+    if (blockedBy === undefined && relatesTo === undefined) return {};
+    const data = { ...t.data };
+    if (blockedBy !== undefined) data.blocked_by = [...new Set(blockedBy)];
+    if (relatesTo !== undefined) data.relates_to = [...new Set(relatesTo)];
+    data.updated_at = now;
+    return commit(doc, [{ file: t.file, start: t.start, end: t.end, replacement: record('TASK', data, t.body) }]);
+  }
+  // Derived, display-only views over the one-directional storage: "blocks" and the reverse side of
+  // "relates to" are never written, only computed from every task's own blocked_by/relates_to.
+  const blockedBy = (doc, task) => (task.blocked_by ?? []).map(id => doc.byId.get(id)).filter(Boolean);
+  const blocks = (doc, task) => doc.tasks.filter(t => (t.blocked_by ?? []).includes(task.id));
+  function relatedTasks(doc, task) {
+    const direct = (task.relates_to ?? []).map(id => doc.byId.get(id)).filter(Boolean);
+    const reverse = doc.tasks.filter(t => t.id !== task.id && (t.relates_to ?? []).includes(task.id));
+    return [...new Map([...direct, ...reverse].map(t => [t.id, t])).values()];
+  }
+  const isBlocked = (doc, task) => blockedBy(doc, task).some(b => b.status !== 'done' && !inactive.has(b.status));
+  // The dependency editor works in terms of the derived views too ("blocking" = the reverse of blocked_by,
+  // "relates to" = either side): this reconciles a desired end state for all three at once, writing a diff
+  // to whichever other tasks' own records currently hold the relation, since only blocked_by/relates_to are
+  // ever stored, never their reverse. A direct blocking cycle (and any longer one) is still caught by parse()
+  // when commit() re-validates, so this is a convenience layer, not a second source of truth.
+  function setRelationships(doc, id, { blockedBy: wantBlockedBy, blocking, relatesTo } = {}, now = new Date().toISOString()) {
+    const t = doc.byId.get(id);
+    if (!t) fail('task_not_found', { id });
+    const edits = [];
+    const data = { ...t.data };
+    let touched = false;
+    if (wantBlockedBy !== undefined) { data.blocked_by = [...new Set(wantBlockedBy)]; touched = true; }
+    if (blocking !== undefined) {
+      const wantSet = new Set(blocking);
+      const currentSet = new Set(blocks(doc, t).map(x => x.id));
+      for (const oid of new Set([...currentSet, ...wantSet])) {
+        if (wantSet.has(oid) === currentSet.has(oid)) continue;
+        const other = doc.byId.get(oid);
+        if (!other) continue;
+        const set = new Set(other.blocked_by ?? []);
+        wantSet.has(oid) ? set.add(id) : set.delete(id);
+        edits.push({ file: other.file, start: other.start, end: other.end, replacement: record('TASK', { ...other.data, blocked_by: [...set], updated_at: now }, other.body) });
+      }
+    }
+    if (relatesTo !== undefined) {
+      const wantSet = new Set(relatesTo);
+      const currentSet = new Set(relatedTasks(doc, t).map(x => x.id));
+      const ownSet = new Set(t.relates_to ?? []);
+      for (const oid of new Set([...currentSet, ...wantSet])) {
+        if (wantSet.has(oid) === currentSet.has(oid)) continue;
+        if (wantSet.has(oid)) ownSet.add(oid);
+        else {
+          ownSet.delete(oid);
+          const other = doc.byId.get(oid);
+          if (other && (other.relates_to ?? []).includes(id)) {
+            const set = new Set(other.relates_to); set.delete(id);
+            edits.push({ file: other.file, start: other.start, end: other.end, replacement: record('TASK', { ...other.data, relates_to: [...set], updated_at: now }, other.body) });
+          }
+        }
+      }
+      data.relates_to = [...ownSet]; touched = true;
+    }
+    if (touched) { data.updated_at = now; edits.push({ file: t.file, start: t.start, end: t.end, replacement: record('TASK', data, t.body) }); }
+    return commit(doc, edits);
+  }
+  // Labels are records like milestones (id/title/color), referenced by task.labels; the section is found
+  // the same way as the milestones one.
+  function labelsSection(doc) {
+    const first = doc.labels[0];
+    const headings = [...doc.text.matchAll(/^## .+$/gm)];
+    if (first) return headings.filter(h => h.index < first.start).at(-1) ?? null;
+    return headings.find(h => /labels?|метк|ярлык/i.test(h[0])) ?? null;
+  }
+  // True only when the registry has no "## Labels" section at all — not even an empty one, which is left
+  // alone. Used by the UI to seed the default label set the first time it needs to show labels for such a
+  // project (see seedDefaultLabels); addLabel itself never seeds, only creates the bare heading it needs.
+  const needsLabelSeed = doc => doc.labels.length === 0 && !labelsSection(doc);
+  // Where a "## Labels" heading lands in a registry that doesn't have one yet: right after the last
+  // milestone, or before whatever "## " heading introduces the first task, or at the end of the file.
+  function labelHeadingAnchor(doc) {
+    const lastMilestone = doc.milestones.at(-1);
+    const firstTask = doc.tasks.filter(t => t.file === REGISTRY).sort((a, b) => a.start - b.start)[0];
+    if (lastMilestone) return lastMilestone.end;
+    if (firstTask) {
+      // No milestones section to anchor on: land before whatever "## " heading (usually "## Tasks")
+      // introduces the first task, not between that heading and the task itself.
+      const headings = [...doc.text.matchAll(/^## .+$/gm)];
+      const before = headings.filter(h => h.index < firstTask.start).at(-1);
+      return before ? before.index : firstTask.start;
+    }
+    return doc.text.length;
+  }
+  // Inserts the default label set as a new "## Labels" section — called by the UI when the user opens the
+  // label picker or Manage labels on a registry that has no such section yet, never automatically from
+  // addLabel: adding one label to an old registry should not silently inject five more.
+  function seedDefaultLabels(doc) {
+    if (!needsLabelSeed(doc)) return {};
+    const at = labelHeadingAnchor(doc);
+    const seedRecords = defaultLabels.map((l, i) => record('LABEL', { id: 'L' + String(i + 1).padStart(2, '0'), title: l.title, color: l.color }, '')).join('');
+    const before = doc.text.slice(0, at), rest = doc.text.slice(at);
+    let replacement = (before.endsWith('\n\n') || !before.endsWith('\n') ? '' : '\n') + '## Labels\n\n' + seedRecords;
+    if (!before.endsWith('\n')) replacement = '\n' + replacement;
+    if (rest.startsWith('\n')) replacement = replacement.replace(/\n$/, '');
+    return commit(doc, [{ file: REGISTRY, start: at, end: at, replacement }]);
+  }
+  const checkColor = color => { if (!HEX_COLOR.test(color)) fail('label_color', { color }); };
+  function addLabel(doc, { title, color }) {
+    checkTitle(title); checkColor(color);
+    const id = 'L' + String(Math.max(0, ...doc.labels.map(l => Number(l.id.slice(1)))) + 1).padStart(2, '0');
+    const last = doc.labels.at(-1);
+    let at, needsHeading = false;
+    if (last) at = last.end;
+    else {
+      const heading = labelsSection(doc);
+      if (heading) at = Math.min(doc.text.length, heading.index + heading[0].length + 1);
+      else {
+        // Soft migration: a registry written before labels existed has no "## Labels" heading yet — add one
+        // automatically instead of failing, so calling addLabel directly (an agent, a script) never breaks
+        // on an old project. This never seeds the default set — that only happens through the UI.
+        needsHeading = true;
+        at = labelHeadingAnchor(doc);
+      }
+    }
+    const before = doc.text.slice(0, at), rest = doc.text.slice(at);
+    let replacement = (before.endsWith('\n\n') || !before.endsWith('\n') ? '' : '\n') + (needsHeading ? '## Labels\n\n' : '') + record('LABEL', { id, title: title.trim(), color }, '');
+    if (!before.endsWith('\n')) replacement = '\n' + replacement;
+    if (rest.startsWith('\n')) replacement = replacement.replace(/\n$/, '');
+    const changes = commit(doc, [{ file: REGISTRY, start: at, end: at, replacement }]);
+    return { changes, id };
+  }
+  function editLabel(doc, id, title, color) {
+    const l = doc.byLabel.get(id);
+    if (!l) fail('label_not_found', { id });
+    checkTitle(title); checkColor(color);
+    return commit(doc, [{ file: REGISTRY, start: l.start, end: l.end, replacement: record('LABEL', { ...l.data, title: title.trim(), color }, '') }]);
+  }
+  function deleteLabel(doc, id) {
+    const l = doc.byLabel.get(id);
+    if (!l) fail('label_not_found', { id });
+    const edits = [{ file: REGISTRY, start: l.start, end: l.end, replacement: '' }];
+    for (const t of doc.tasks) if (t.labels?.includes(id)) edits.push({ file: t.file, start: t.start, end: t.end, replacement: record('TASK', { ...t.data, labels: t.labels.filter(x => x !== id) }, t.body) });
+    return commit(doc, edits);
+  }
+  // Label assignment, like dependencies, is editable in any status.
+  function setTaskLabels(doc, id, labelIds, now = new Date().toISOString()) {
+    const t = doc.byId.get(id);
+    if (!t) fail('task_not_found', { id });
+    const labels = [...new Set(labelIds)];
+    if (JSON.stringify([...(t.labels ?? [])].sort()) === JSON.stringify([...labels].sort())) return {};
+    return commit(doc, [{ file: t.file, start: t.start, end: t.end, replacement: record('TASK', { ...t.data, labels, updated_at: now }, t.body) }]);
+  }
   // Status changes from the UI touch only status-related fields: author, branch, commit, body and result
   // stay as the agent left them. done stamps completed_at; leaving done clears it; in_progress needs an
   // assignee, so a free task taken from the UI gets "User".
@@ -442,6 +663,12 @@
   }
   const closedAt = t => Date.parse(t.completed_at ?? t.updated_at);
   const openDescendant = (doc, id) => doc.tasks.some(c => c.parent === id && (!closed.has(c.status) || openDescendant(doc, c.id)));
+  // #202: subtasks (at any depth) that are done/cancelled/removed but not archived yet — offered
+  // alongside a manual archive so a finished tree does not leave orphaned records behind in the registry.
+  function closedDescendants(doc, id) {
+    const children = doc.tasks.filter(c => c.parent === id);
+    return children.filter(c => !c.archived && closed.has(c.status)).map(c => c.id).concat(children.flatMap(c => closedDescendants(doc, c.id)));
+  }
   function archive(doc, ids, now = new Date().toISOString()) {
     const list = [...new Set(Array.isArray(ids) ? ids : [ids])].map(id => doc.byId.get(id) ?? fail('task_not_found', { id }));
     for (const t of list) {
@@ -466,6 +693,14 @@
   function autoArchive(doc, now = new Date().toISOString(), days = ARCHIVE_AFTER_DAYS) {
     const ids = archiveCandidates(doc, now, days);
     return { ids, changes: ids.length ? archive(doc, ids, now) : {} };
+  }
+  // #202: the auto-archive cutoff is a project-wide setting, so it lives in the registry's front
+  // matter (like next_task) rather than in one person's .trackfile/config.json.
+  function setArchiveAfterDays(doc, days) {
+    if (!Number.isSafeInteger(days) || days < 0) fail('archive_after_days');
+    const meta = { ...doc.meta, archive_after_days: days };
+    const text = `---\n${dump(meta)}\n---\n` + doc.text.slice(doc.frontLength);
+    return commit(doc, [], { [REGISTRY]: text });
   }
   const findComment = (doc, taskId, commentId) => {
     const t = doc.byId.get(taskId);
@@ -501,7 +736,7 @@
     const comments = t.comments.filter((_, i) => i !== index);
     return commit(doc, [], { [commentsFile(t.id)]: commentsText(comments) });
   }
-  const api = { statuses, priorities, priorityOf, inactive, closed, REGISTRY, ARCHIVE, ARCHIVE_AFTER_DAYS, commentsFile, COMMENTS_FILE, MESSAGES, format, label, yaml, dump, parse, parseComments, commentsText, apply, archive, unarchive, archiveCandidates, autoArchive, milestoneOf, excluded, progress, complete, defaults, cleanConfig, editTask, addTask, editMilestone, addMilestone, setMilestone, addToMilestone, setParent, setStatus, addComment, editComment, setCommentDone, deleteComment };
+  const api = { statuses, priorities, priorityOf, inactive, closed, presetColors, defaultLabels, edgeTypes, REGISTRY, ARCHIVE, ARCHIVE_AFTER_DAYS, commentsFile, COMMENTS_FILE, MESSAGES, format, label, yaml, dump, parse, parseComments, commentsText, apply, archive, unarchive, archiveCandidates, autoArchive, closedDescendants, setArchiveAfterDays, milestoneOf, excluded, progress, complete, defaults, cleanConfig, editTask, addTask, editMilestone, addMilestone, setMilestone, addToMilestone, setParent, setDependencies, setRelationships, blockedBy, blocks, relatedTasks, isBlocked, addLabel, editLabel, deleteLabel, needsLabelSeed, seedDefaultLabels, setTaskLabels, setStatus, addComment, editComment, setCommentDone, deleteComment };
   root.RegistryModel = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);
