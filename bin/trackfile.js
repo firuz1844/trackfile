@@ -14,6 +14,8 @@ Usage:
   trackfile toc [--closed] [--all] [--registry FILE]         table of contents for agents
   trackfile migrate --shared [--branch NAME] [--remote NAME] [--local] [--dry-run] [--task ID]
   trackfile migrate --rollback [--dry-run]
+  trackfile check [--registry FILE]                          validate registry/archive invariants
+  trackfile merge-driver %O %A %B [%P]                       git merge driver (registered automatically)
   trackfile --help | --version
 
 serve:
@@ -90,6 +92,26 @@ async function main() {
     const migrate = require('../lib/migrate.cjs');
     try {
       await migrate.run({ branch: opts.branch || 'trackfile', remote: opts.remote || 'origin', local: Boolean(opts.local), history: Boolean(opts.history), push: Boolean(opts.push), dryRun: Boolean(opts['dry-run']), rollback: Boolean(opts.rollback), absorb: opts.absorb || null, task: opts.task || null });
+    } catch (error) { console.error(error.message); process.exit(1); }
+    return;
+  }
+  if (command === 'check') {
+    const { check } = require('../lib/check.cjs');
+    const result = check(layoutFor(opts));
+    if (result.ok) { console.log(result.message); return; }
+    console.error(result.message); process.exit(1);
+    return;
+  }
+  if (command === 'merge-driver') {
+    const fs = require('node:fs');
+    const merge = require('../lib/merge.cjs');
+    const [, oFile, aFile, bFile, pPath] = opts._;
+    if (!oFile || !aFile || !bFile) { console.error('Usage: trackfile merge-driver %O %A %B [%P]'); process.exit(2); }
+    const renumberTasks = path.basename(pPath || aFile) === DEFAULTS.registry;
+    try {
+      const baseText = fs.readFileSync(oFile, 'utf8'), oursText = fs.readFileSync(aFile, 'utf8'), theirsText = fs.readFileSync(bFile, 'utf8');
+      const { text } = merge.mergeRegistryText(baseText, oursText, theirsText, { renumberTasks });
+      fs.writeFileSync(aFile, text);
     } catch (error) { console.error(error.message); process.exit(1); }
     return;
   }
