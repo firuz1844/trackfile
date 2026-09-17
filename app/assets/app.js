@@ -10,7 +10,30 @@
   const badge = task => el('span', 'badge ' + task.status, labels(task.status));
   // A record from the archive is marked with a chip next to its status everywhere it is shown.
   const archiveChip = task => { const chip = el('span', 'archive-chip', t('archive.chip')); chip.title = t('archive.since', { date: date(task.archived_at) }); return chip; };
-  const badges = task => task.archived ? [badge(task), archiveChip(task)] : [badge(task)];
+  const labelChip = l => { const chip = el('span', 'label-chip', l.title); chip.style.setProperty('--label-color', l.color); chip.title = l.title; return chip; };
+  function blockedChip(task) {
+    const openBlockers = M.blockedBy(doc, task).filter(b => b.status !== 'done' && !M.inactive.has(b.status));
+    const chip = el('span', 'archive-chip blocked-chip', t('dependency.blocked_chip'));
+    chip.title = t('dependency.blocked_hint', { ids: openBlockers.map(b => '#' + b.id).join(', ') });
+    return chip;
+  }
+  function badges(task) {
+    const list = [badge(task)];
+    if (task.archived) list.push(archiveChip(task));
+    if (M.isBlocked(doc, task)) list.push(blockedChip(task));
+    return list;
+  }
+  const labelChips = task => (task.labels ?? []).map(id => doc.byLabel.get(id)).filter(Boolean).map(labelChip);
+  // Compact rows (tree, recent changes, subtask lists) show labels inline next to the status badges; the
+  // full task view shows them separately, in their own wrapping "Labels" row under the title (see below).
+  const rowBadges = task => [...badges(task), ...labelChips(task)];
+  function taskLabelsRow(task) {
+    const chips = labelChips(task);
+    if (!chips.length) return null;
+    const row = el('div', 'task-labels');
+    row.append(el('span', 'task-labels-heading', t('task.labels')), ...chips);
+    return row;
+  }
   // baseline — the map of registry files as store.readAll() returned them; compared by content.
   const sameFiles = (a, b) => { if (!a || !b) return a === b; const keys = new Set([...Object.keys(a), ...Object.keys(b)]); for (const k of keys) if ((a[k] ?? null) !== (b[k] ?? null)) return false; return true; };
   async function writeChanges(changes, expected) { for (const [name, text] of Object.entries(changes)) await store.write(name, text, expected[name] ?? null); }
@@ -116,7 +139,7 @@
     if (pageChange) pushRoute(); else replaceRoute();
   }
   function jumpTask(id, view = 'tree') {
-    config.search = ''; config.statuses = []; config.milestone = 'all'; selectTask(id, view);
+    config.search = ''; config.statuses = []; config.milestone = 'all'; config.labels = []; config.authors = []; config.assignees = []; selectTask(id, view);
   }
   const openTaskPage = id => selectTask(id, 'task');
   const openTaskComment = (id, comment) => selectTask(id, 'task', Number(comment));
@@ -184,6 +207,7 @@
     else if ((m = /^source\/(.+)$/.exec(hash))) { render(); replaceRoute(); openSource(m[1], null, true); return; }
     else if ((m = /^commit\/([0-9a-f]{4,40})$/i.exec(hash))) { render(); replaceRoute(); openSource(commitKey(m[1]), null, true); return; }
     else if (hash === 'tree') config.view = 'tree';
+    else if (hash === 'diagram') config.view = 'diagram';
     else if ((m = /^milestone\/(M\d+)$/.exec(hash)) && doc.byMilestone.has(m[1])) { config.view = 'milestone'; config.selectedMilestone = m[1]; }
     render(); replaceRoute();
   }
@@ -218,16 +242,17 @@
     if (config.view === 'task' && !doc.byId.has(config.selected)) config.view = 'tree';
     if (config.view === 'milestone' && !doc.byMilestone.has(config.selectedMilestone)) config.view = 'dashboard';
     const view = activeView(), task = config.view === 'task' ? doc.byId.get(config.selected) : null, milestone = config.view === 'milestone' ? doc.byMilestone.get(config.selectedMilestone) : null;
-    $('dashboard').hidden = view !== 'dashboard'; $('tree-view').hidden = view !== 'tree'; $('task-page').hidden = view !== 'task'; $('source-page').hidden = view !== 'source'; $('milestone-page').hidden = view !== 'milestone';
+    $('dashboard').hidden = view !== 'dashboard'; $('tree-view').hidden = view !== 'tree'; $('task-page').hidden = view !== 'task'; $('source-page').hidden = view !== 'source'; $('milestone-page').hidden = view !== 'milestone'; $('diagram-view').hidden = view !== 'diagram';
     $('task-nav').hidden = view !== 'task' && view !== 'source' && view !== 'milestone'; $('page-actions').hidden = view !== 'task';
     // On the milestone page its title is the main heading and the kind/number become the subtitle.
-    $('heading').textContent = view === 'dashboard' ? t('page.dashboard') : view === 'tree' ? t('page.tree') : view === 'task' ? t('page.task', { id: task.id }) : view === 'milestone' ? milestone.title : reader.commit ? t('page.commit', { hash: reader.commit.short }) : reader.path.split('/').pop();
+    $('heading').textContent = view === 'dashboard' ? t('page.dashboard') : view === 'tree' ? t('page.tree') : view === 'diagram' ? t('page.diagram') : view === 'task' ? t('page.task', { id: task.id }) : view === 'milestone' ? milestone.title : reader.commit ? t('page.commit', { hash: reader.commit.short }) : reader.path.split('/').pop();
     $('page-name').textContent = $('heading').textContent;
-    $('subtitle').textContent = view === 'dashboard' ? t('page.dashboard_sub') : view === 'tree' ? t('page.tree_sub') : view === 'task' ? (task.kind === 'feature' ? t('kind.feature') : t('kind.task')) + ' · ' + labels(task.status) : view === 'milestone' ? t('page.milestone_sub', { id: milestone.id }) : reader.commit ? t('page.commit_sub', { subject: reader.commit.subject }) : t('page.source_sub', { path: reader.path });
+    $('subtitle').textContent = view === 'dashboard' ? t('page.dashboard_sub') : view === 'tree' ? t('page.tree_sub') : view === 'diagram' ? t('page.diagram_sub') : view === 'task' ? (task.kind === 'feature' ? t('kind.feature') : t('kind.task')) + ' · ' + labels(task.status) : view === 'milestone' ? t('page.milestone_sub', { id: milestone.id }) : reader.commit ? t('page.commit_sub', { subject: reader.commit.subject }) : t('page.source_sub', { path: reader.path });
     // The top button on a milestone page creates the task right inside that milestone.
     $('new-task').textContent = view === 'milestone' ? t('task.new_in_milestone') : t('task.new');
-    document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === (view === 'dashboard' || view === 'milestone' ? 'dashboard' : 'tree')));
-    if (view === 'dashboard') renderDashboard(); else if (view === 'tree') { renderFilters(); renderTree(); renderDetail(); } else if (view === 'task') renderTaskPage(task); else if (view === 'milestone') renderMilestonePage(milestone); else renderSourcePage();
+    $('new-task').hidden = view === 'diagram';
+    document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === (view === 'dashboard' || view === 'milestone' ? 'dashboard' : view === 'diagram' ? 'diagram' : 'tree')));
+    if (view === 'dashboard') renderDashboard(); else if (view === 'tree') { renderFilters(); renderTree(); renderDetail(); } else if (view === 'diagram') renderDiagram(); else if (view === 'task') renderTaskPage(task); else if (view === 'milestone') renderMilestonePage(milestone); else renderSourcePage();
     const readerChanged = view === 'source' && lastReaderPath !== reader.path;
     const milestoneChanged = view === 'milestone' && lastMilestone !== milestone.id;
     if (switching || readerChanged || milestoneChanged || lastView === null) scrollTo({ top: view === 'task' ? 0 : scrollMemory[scrollKey(view, view === 'source' ? reader.path : milestone?.id)] ?? 0, behavior: 'instant' });
@@ -242,7 +267,7 @@
   const hiddenDone = t => config.hideDone && t.status === 'done';
   function taskRow(t) {
     const row = clickable(button('', () => jumpTask(t.id), 'recent-row'), t.id);
-    row.append(el('span', 'mono', '#' + t.id), el('span', 'recent-title', t.title), ...badges(t), el('time', 'mono', date(t.updated_at)));
+    row.append(el('span', 'mono', '#' + t.id), el('span', 'recent-title', t.title), ...rowBadges(t), el('time', 'mono', date(t.updated_at)));
     return row;
   }
   const milestoneState = p => p.total && p.done === p.total ? t('milestone.state_done') : p.active ? t('milestone.state_active') : t('milestone.state_progress');
@@ -272,26 +297,79 @@
     const recent = doc.tasks.filter(t => !hiddenDone(t) && !t.archived).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at) || Number(b.id) - Number(a.id)).slice(0, 8);
     $('recent').replaceChildren(...recent.map(taskRow));
   }
-  // The tree and the milestone page share one multi-select status filter and one sort order.
-  const taskOrder = mode => mode === 'updated'
-    ? (a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at) || Number(a.id) - Number(b.id)
-    : (a, b) => Number(a.id) - Number(b.id);
-  function renderStatusPicker(summary, container, selected, onChange) {
-    summary.textContent = selected.length ? selected.map(labels).join(', ') : t('filter.all_statuses');
-    container.replaceChildren(...M.statuses.map(status => {
+  // The tree and the milestone page share one multi-select status filter and one sort order: a field plus an
+  // independent asc/desc direction (a completed_at-less task sorts as if "never", i.e. last regardless of
+  // direction, since there is nothing to compare).
+  const SORT_FIELDS = [['id', 'sort.id'], ['created', 'sort.created'], ['updated', 'sort.updated'], ['completed', 'sort.completed']];
+  const sortKey = (field, task) => field === 'created' ? Date.parse(task.created_at)
+    : field === 'updated' ? Date.parse(task.updated_at)
+    : field === 'completed' ? (task.completed_at ? Date.parse(task.completed_at) : -Infinity)
+    : Number(task.id);
+  const taskOrder = (field, dir) => {
+    const mul = dir === 'asc' ? 1 : -1;
+    return (a, b) => mul * (sortKey(field, a) - sortKey(field, b)) || Number(a.id) - Number(b.id);
+  };
+  // Generic multi-select dropdown: a <details><summary> showing the selection, a checkbox list below.
+  // An empty selection means "no filter" (everything shown); `emptyLabel` is the summary text for that case.
+  // `swatch(value)` optionally renders an extra node (a color dot) between the checkbox and its text.
+  function renderCheckPicker(summary, container, items, selected, emptyLabel, onChange, swatch = null) {
+    summary.textContent = selected.length ? items.filter(([value]) => selected.includes(value)).map(([, text]) => text).join(', ') : emptyLabel;
+    container.replaceChildren(...items.map(([value, text]) => {
       const label = el('label');
-      const input = el('input'); input.type = 'checkbox'; input.value = status; input.checked = selected.includes(status);
+      const input = el('input'); input.type = 'checkbox'; input.value = value; input.checked = selected.includes(value);
       input.addEventListener('change', () => onChange([...container.querySelectorAll('input:checked')].map(item => item.value)));
-      label.append(input, el('span', '', labels(status))); return label;
+      label.append(input, ...(swatch ? [swatch(value)] : []), el('span', '', text)); return label;
     }));
+  }
+  function renderStatusPicker(summary, container, selected, onChange) {
+    renderCheckPicker(summary, container, M.statuses.map(status => [status, labels(status)]), selected, t('filter.all_statuses'), onChange);
+  }
+  function renderLabelPicker(summary, container, selected, onChange) {
+    const swatch = id => { const s = el('span', 'label-swatch'); s.style.background = doc.byLabel.get(id)?.color ?? 'transparent'; return s; };
+    renderCheckPicker(summary, container, doc.labels.map(l => [l.id, l.title]), selected, t('filter.all_labels'), onChange, swatch);
+  }
+  // Single-select counterpart of renderCheckPicker: no radio dots — a checkmark on the selected row instead
+  // (the same convention as the context menu's radio items), with unselected rows padded to match so the
+  // text never shifts depending on which row happens to be checked. Picking one applies and closes the popover.
+  function renderRadioPicker(summary, container, items, selected, onChange) {
+    const details = container.closest('details');
+    summary.textContent = (items.find(([value]) => value === selected) ?? items[0])[1];
+    container.replaceChildren(...items.map(([value, text]) => {
+      const checked = value === selected;
+      const opt = el('button', 'radio-item' + (checked ? ' checked' : ''), text);
+      opt.type = 'button'; opt.setAttribute('role', 'menuitemradio'); opt.setAttribute('aria-checked', String(checked));
+      opt.addEventListener('click', () => { onChange(value); details.open = false; });
+      return opt;
+    }));
+  }
+  function renderSortDirButton(dir) {
+    const btn = $('sort-dir'); btn.textContent = dir === 'asc' ? '↑' : '↓';
+    btn.title = t(dir === 'asc' ? 'sort.dir_asc' : 'sort.dir_desc'); btn.setAttribute('aria-label', btn.title);
   }
   function renderFilters() {
     $('search').value = config.search;
     renderStatusPicker($('status-summary'), $('status-options'), config.statuses, selected => {
       config.statuses = selected; renderFilters(); renderTree(); saveConfig();
     });
-    options($('milestone'), [['all', t('filter.all_milestones')], ['none', t('filter.no_milestone')], ...doc.milestones.map(m => [m.id, `${m.id} · ${m.title}`])], config.milestone);
-    options($('sort'), [['id', t('sort.id')], ['updated', t('sort.updated')]], config.sort);
+    $('label-filter').hidden = !doc.labels.length;
+    if (doc.labels.length) renderLabelPicker($('label-summary'), $('label-options'), config.labels, selected => {
+      config.labels = selected; renderFilters(); renderTree(); saveConfig();
+    });
+    renderRadioPicker($('milestone-summary'), $('milestone-options'), [['all', t('filter.all_milestones')], ['none', t('filter.no_milestone')], ...doc.milestones.map(m => [m.id, `${m.id} · ${m.title}`])], config.milestone, selected => {
+      config.milestone = selected; renderFilters(); renderTree(); saveConfig();
+    });
+    const authorItems = [...new Set(doc.tasks.map(x => x.author).filter(Boolean))].sort().map(a => [a, a]);
+    renderCheckPicker($('author-summary'), $('author-options'), authorItems, config.authors, t('filter.all_authors'), selected => {
+      config.authors = selected; renderFilters(); renderTree(); saveConfig();
+    });
+    const assigneeItems = [['none', t('meta.unassigned')], ...[...new Set(doc.tasks.map(x => x.assignee).filter(Boolean))].sort().map(a => [a, a])];
+    renderCheckPicker($('assignee-summary'), $('assignee-options'), assigneeItems, config.assignees, t('filter.all_assignees'), selected => {
+      config.assignees = selected; renderFilters(); renderTree(); saveConfig();
+    });
+    renderRadioPicker($('sort-summary'), $('sort-options'), SORT_FIELDS.map(([value, key]) => [value, t(key)]), config.sort, selected => {
+      config.sort = selected; renderFilters(); renderTree(); saveConfig();
+    });
+    renderSortDirButton(config.sortDir);
     $('show-archive').checked = config.showArchive;
   }
   // Every tree row shows the code of its effective milestone; an inherited one is dimmed.
@@ -303,19 +381,22 @@
   }
   function renderTree() {
     const term = config.search.toLocaleLowerCase().trim();
-    const filtering = !!term || config.statuses.length > 0 || config.milestone !== 'all';
+    const filtering = !!term || config.statuses.length > 0 || config.milestone !== 'all' || config.labels.length > 0 || config.authors.length > 0 || config.assignees.length > 0;
     const matches = new Set(doc.tasks.filter(t => {
       if (t.archived && !config.showArchive) return false; // archived rows only when asked for
       if (config.statuses.length && !config.statuses.includes(t.status)) return false;
       const milestone = M.milestoneOf(doc, t);
       if (config.milestone !== 'all' && milestone !== (config.milestone === 'none' ? null : config.milestone)) return false;
+      if (config.labels.length && !(t.labels ?? []).some(id => config.labels.includes(id))) return false;
+      if (config.authors.length && !config.authors.includes(t.author)) return false;
+      if (config.assignees.length && !config.assignees.includes(t.assignee ?? 'none')) return false;
       return !term || `${t.id} ${t.title} ${t.body} ${t.result ?? ''} ${t.assignee ?? ''}`.toLocaleLowerCase().includes(term.replace(/^#/, ''));
     }).map(t => t.id));
     const visible = new Set(matches);
     for (const id of matches) { let p = doc.byId.get(id)?.parent; while (p) { visible.add(p); p = doc.byId.get(p)?.parent; } }
     const children = new Map();
     for (const t of doc.tasks) { const key = t.parent; if (!children.has(key)) children.set(key, []); children.get(key).push(t); }
-    for (const list of children.values()) list.sort((a, b) => byPin('pinnedTasks')(a, b) || taskOrder(config.sort)(a, b));
+    for (const list of children.values()) list.sort((a, b) => byPin('pinnedTasks')(a, b) || taskOrder(config.sort, config.sortDir)(a, b));
     function node(t) {
       const group = el('div', 'tree-node');
       const row = el('div', 'tree-row' + (config.selected === t.id ? ' selected' : '') + (flashTask === t.id ? ' flash' : '') + (t.archived ? ' archived' : '')); row.dataset.task = t.id;
@@ -329,7 +410,7 @@
       if (kids.length) expander.setAttribute('aria-expanded', String(expanded));
       const pick = clickable(button('', () => selectTask(t.id), 'tree-select'), t.id);
       pick.append(taskLabel(t), el('span', '', t.title));
-      row.append(expander, pick, ...badges(t)); group.append(row);
+      row.append(expander, pick, ...rowBadges(t)); group.append(row);
       if (expanded && kids.length) { const branch = el('div', 'tree-children'); branch.append(...kids.map(node)); group.append(branch); }
       return group;
     }
@@ -340,7 +421,7 @@
       const row = el('div', 'tree-row' + (config.selected === t.id ? ' selected' : '')); row.dataset.task = t.id;
       const pick = clickable(button('', () => selectTask(t.id), 'tree-select'), t.id);
       pick.append(el('span', 'mono', '★ #' + t.id), el('span', '', t.title));
-      row.append(el('span', 'expander', ''), pick, ...badges(t)); return row;
+      row.append(el('span', 'expander', ''), pick, ...rowBadges(t)); return row;
     }));
     $('tree').replaceChildren(...(children.get(null) ?? []).filter(t => visible.has(t.id)).map(node));
     if (!visible.size) $('tree').append(el('div', 'empty', t('tree.empty')));
@@ -425,6 +506,8 @@
     if (editable) list.push({ label: t('action.edit'), run: () => openEditor(task.id) });
     else list.push({ label: t('action.edit'), disabled: t('action.edit_locked'), menuOnly: true });
     if (!M.excluded(doc, task) && !task.archived) list.push({ label: '＋ ' + t('action.subtask'), run: () => openAddSubtask(task.id) });
+    if (!task.archived) list.push({ label: t('action.manage_dependencies'), run: () => openDependencyEditor(task.id) });
+    if (!task.archived) list.push({ label: t('action.manage_labels'), run: () => openLabelAssign(task.id) });
     list.push({ label: t('action.change_status'), submenu: () => statusItems(task) });
     // Manual move between the registry and the archive; a closed task with open subtasks stays.
     if (task.archived) list.push({ label: t('action.unarchive'), run: () => mutateProject(current => M.unarchive(current, task.id), t('notice.unarchived', { id: task.id }), { operation: 'unarchive', taskId: task.id }) });
@@ -463,6 +546,12 @@
     e.preventDefault(); openMenu(task, e.clientX, e.clientY);
   });
   document.addEventListener('pointerdown', e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); });
+  // Every filter dropdown (status, labels, milestone, author, assignee, sort — tree, milestone page and
+  // diagram alike) is a plain <details class="status-filter">; one delegated listener closes whichever is
+  // open when the click lands outside it, native <select>-like behavior a <details> doesn't give for free.
+  document.addEventListener('pointerdown', e => {
+    document.querySelectorAll('.status-filter[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; });
+  });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !menu.hidden) closeMenu(); });
   window.addEventListener('scroll', closeMenu, true); window.addEventListener('resize', closeMenu);
   // Shared building blocks for the side card and the full task page. Description, result, comments and the
@@ -657,6 +746,19 @@
         sources.append(li);
       }
     }
+    const relationList = (items, kind) => {
+      if (!items.length) return null;
+      const ul = el('ul', 'sources');
+      for (const other of items) {
+        const li = el('li', 'relation-row'), a = el('a', '', `#${other.id} ${other.title}`);
+        a.href = '#'; a.addEventListener('click', e => { e.preventDefault(); openTaskPage(other.id); });
+        const remove = button('🗑', () => removeRelation(task.id, other.id, kind), 'relation-remove');
+        remove.title = t('dependency.remove'); remove.setAttribute('aria-label', remove.title);
+        li.append(a, remove); ul.append(li);
+      }
+      return ul;
+    };
+    const blockedBy = relationList(M.blockedBy(doc, task), 'blocked_by'), blocks = relationList(M.blocks(doc, task), 'blocking'), related = relationList(M.relatedTasks(doc, task), 'relates_to');
     const actions = el('div', 'detail-actions');
     actions.append(...taskActions(task).filter(a => !a.menuOnly && (!a.navigation || a.always)).map(a => {
       if (!a.submenu) return button(a.label, a.run, a.className);
@@ -665,7 +767,7 @@
     }));
     const editable = task.status === 'to-do' && task.assignee === null;
     const lock = editable ? null : el('p', 'hint', t('task.locked'));
-    return { meta, progress, description, result, sources, actions, lock, children, attachments: compact => attachmentsSection(task, { compact }) };
+    return { meta, progress, description, result, sources, blockedBy, blocks, related, actions, lock, children, attachments: compact => attachmentsSection(task, { compact }) };
   }
   // The preview card is shared by the tree and the milestone page; `task` is passed explicitly when the
   // selected task must come from the current list (a milestone never shows a foreign task selected in the tree).
@@ -674,12 +776,17 @@
     if (!task) { target.append(el('p', 'hint', t('detail.empty'))); return; }
     const parts = taskParts(task);
     const top = el('div', 'detail-title'); top.append(copyControl('#' + task.id), ...badges(task));
-    target.append(top, el('h2', '', task.title), parts.meta);
+    target.append(top, el('h2', '', task.title));
+    const labelsRow = taskLabelsRow(task); if (labelsRow) target.append(labelsRow);
+    target.append(parts.meta);
     if (parts.progress) target.append(parts.progress);
     target.append(parts.description);
     target.append(parts.attachments(true));
     if (parts.result) target.append(parts.result);
     if (parts.sources) target.append(el('h3', '', t('task.sources')), parts.sources);
+    if (parts.blockedBy) target.append(el('h3', '', t('dependency.blocked_by')), parts.blockedBy);
+    if (parts.blocks) target.append(el('h3', '', t('dependency.blocks_label')), parts.blocks);
+    if (parts.related) target.append(el('h3', '', t('dependency.related_label')), parts.related);
     if (parts.lock) target.append(parts.lock);
     target.dataset.task = task.id;
     target.append(parts.actions);
@@ -885,29 +992,63 @@
     const actions = el('div', 'detail-actions');
     actions.append(button('＋ ' + t('milestone.add_task'), () => openAddToMilestone(m.id), 'primary'), button('✎ ' + t('action.edit'), () => openMilestoneEditor(m.id)), button(isPinned('pinnedMilestones', m.id) ? '★ ' + t('action.unpin') : '☆ ' + t('action.pin'), () => togglePin('pinnedMilestones', m.id), 'quiet'));
     card.append(actions); page.append(card);
-    const filters = el('div', 'filters milestone-filters');
-    const statusFilter = el('details', 'status-filter');
-    const statusSummary = el('summary'), statusOptions = el('div', 'status-options'); statusFilter.append(statusSummary, statusOptions);
-    renderStatusPicker(statusSummary, statusOptions, config.milestoneStatuses, selected => {
-      config.milestoneStatuses = selected; renderMilestonePage(m); page.querySelector('.status-filter').open = true; saveConfig();
-    });
-    const sortLabel = el('label'); sortLabel.append(el('span', 'sr-only', t('sort.label')));
-    const sort = el('select'); options(sort, [['id', t('sort.id')], ['updated', t('sort.updated')]], config.milestoneSort);
-    sort.addEventListener('change', () => { config.milestoneSort = sort.value; renderMilestonePage(m); saveConfig(); });
-    sortLabel.append(sort); filters.append(statusFilter, sortLabel); page.append(filters);
     // Every task with this effective milestone; with a filter the parents of matches are kept for context.
     const members = doc.tasks.filter(task => M.milestoneOf(doc, task) === m.id);
+    // The same filter bar as the task tree (status/labels/author/assignee/sort), minus a milestone picker —
+    // this page is already scoped to one. Each multi-select reopens itself after a change (page.replaceChildren
+    // below discards the old popover, so the freshly built one with the same id is what "reopen" acts on).
+    const filters = el('div', 'filters');
+    const statusFilter = el('details', 'status-filter'); statusFilter.id = 'ms-status-filter';
+    const statusSummary = el('summary'), statusOptions = el('div', 'status-options'); statusFilter.append(statusSummary, statusOptions);
+    renderStatusPicker(statusSummary, statusOptions, config.milestoneStatuses, selected => {
+      config.milestoneStatuses = selected; renderMilestonePage(m); $('ms-status-filter').open = true; saveConfig();
+    });
+    const labelFilter = el('details', 'status-filter'); labelFilter.id = 'ms-label-filter'; labelFilter.hidden = !doc.labels.length;
+    const labelSummary = el('summary'), labelOptions = el('div', 'status-options'); labelFilter.append(labelSummary, labelOptions);
+    if (doc.labels.length) renderLabelPicker(labelSummary, labelOptions, config.milestoneLabels, selected => {
+      config.milestoneLabels = selected; renderMilestonePage(m); $('ms-label-filter').open = true; saveConfig();
+    });
+    const authorItems = [...new Set(members.map(x => x.author).filter(Boolean))].sort().map(a => [a, a]);
+    const authorFilter = el('details', 'status-filter'); authorFilter.id = 'ms-author-filter';
+    const authorSummary = el('summary'), authorOptions = el('div', 'status-options'); authorFilter.append(authorSummary, authorOptions);
+    renderCheckPicker(authorSummary, authorOptions, authorItems, config.milestoneAuthors, t('filter.all_authors'), selected => {
+      config.milestoneAuthors = selected; renderMilestonePage(m); $('ms-author-filter').open = true; saveConfig();
+    });
+    const assigneeItems = [['none', t('meta.unassigned')], ...[...new Set(members.map(x => x.assignee).filter(Boolean))].sort().map(a => [a, a])];
+    const assigneeFilter = el('details', 'status-filter'); assigneeFilter.id = 'ms-assignee-filter';
+    const assigneeSummary = el('summary'), assigneeOptions = el('div', 'status-options'); assigneeFilter.append(assigneeSummary, assigneeOptions);
+    renderCheckPicker(assigneeSummary, assigneeOptions, assigneeItems, config.milestoneAssignees, t('filter.all_assignees'), selected => {
+      config.milestoneAssignees = selected; renderMilestonePage(m); $('ms-assignee-filter').open = true; saveConfig();
+    });
+    const sortWrap = el('div', 'sort-control');
+    const sortFilter = el('details', 'status-filter'); sortFilter.id = 'ms-sort-filter';
+    const sortSummary = el('summary'), sortOptions = el('div', 'status-options'); sortFilter.append(sortSummary, sortOptions);
+    renderRadioPicker(sortSummary, sortOptions, SORT_FIELDS.map(([value, key]) => [value, t(key)]), config.milestoneSort, selected => {
+      config.milestoneSort = selected; renderMilestonePage(m); saveConfig();
+    });
+    const sortDirBtn = button(config.milestoneSortDir === 'asc' ? '↑' : '↓', () => {
+      config.milestoneSortDir = config.milestoneSortDir === 'asc' ? 'desc' : 'asc'; renderMilestonePage(m); saveConfig();
+    }, 'sort-dir');
+    sortDirBtn.title = t(config.milestoneSortDir === 'asc' ? 'sort.dir_asc' : 'sort.dir_desc'); sortDirBtn.setAttribute('aria-label', sortDirBtn.title);
+    sortWrap.append(sortFilter, sortDirBtn);
+    filters.append(statusFilter, labelFilter, authorFilter, assigneeFilter, sortWrap); page.append(filters);
+    const msFiltering = config.milestoneStatuses.length > 0 || config.milestoneLabels.length > 0 || config.milestoneAuthors.length > 0 || config.milestoneAssignees.length > 0;
     const ids = new Set(members.map(task => task.id));
-    const matches = new Set(members.filter(task => !config.milestoneStatuses.length || config.milestoneStatuses.includes(task.status)).map(task => task.id));
+    const matches = new Set(members.filter(task =>
+      (!config.milestoneStatuses.length || config.milestoneStatuses.includes(task.status)) &&
+      (!config.milestoneLabels.length || (task.labels ?? []).some(id => config.milestoneLabels.includes(id))) &&
+      (!config.milestoneAuthors.length || config.milestoneAuthors.includes(task.author)) &&
+      (!config.milestoneAssignees.length || config.milestoneAssignees.includes(task.assignee ?? 'none'))
+    ).map(task => task.id));
     const visible = new Set(matches);
     for (const id of matches) { let parent = doc.byId.get(id)?.parent; while (ids.has(parent)) { visible.add(parent); parent = doc.byId.get(parent)?.parent; } }
     const children = new Map();
     for (const task of members.filter(task => visible.has(task.id))) { const key = ids.has(task.parent) && visible.has(task.parent) ? task.parent : null; if (!children.has(key)) children.set(key, []); children.get(key).push(task); }
-    for (const list of children.values()) list.sort(taskOrder(config.milestoneSort));
+    for (const list of children.values()) list.sort(taskOrder(config.milestoneSort, config.milestoneSortDir));
     // As in the tree: single click selects into the card on the right, double click opens the page; nodes with
-    // subtasks fold with the arrow or with Collapse/Expand all (with a status filter everything is expanded
+    // subtasks fold with the arrow or with Collapse/Expand all (with a filter active everything is expanded
     // because parents are shown for context).
-    const filtering = config.milestoneStatuses.length > 0;
+    const filtering = msFiltering;
     const collapsed = new Set(config.milestoneCollapsed);
     const withKids = [...children.keys()].filter(Boolean);
     const rerender = () => { renderMilestonePage(m); saveConfig(); };
@@ -924,7 +1065,7 @@
       if (kids.length) expander.setAttribute('aria-expanded', String(expanded));
       const pick = clickable(button('', () => selectTask(task.id, 'milestone'), 'tree-select'), task.id);
       pick.append(el('span', 'mono', '#' + task.id + (task.kind === 'feature' ? ' · ' + t('kind.feature_tag') : '')), el('span', '', task.title + (task.milestone ? '' : ' · ' + t('milestone.inherits'))));
-      row.append(expander, pick, ...badges(task)); group.append(row);
+      row.append(expander, pick, ...rowBadges(task)); group.append(row);
       if (expanded && kids.length) { const branch = el('div', 'tree-children'); branch.append(...kids.map(node)); group.append(branch); }
       return group;
     };
@@ -936,9 +1077,9 @@
     const layoutBox = el('div', 'tree-layout milestone-layout');
     const tree = el('div', 'milestone-tree tree-panel');
     tree.append(el('p', 'hint tree-hint', t('tree.hint')));
-    const header = el('div', 'tree-header'); header.append(el('span', '', t('tree.header')), el('span', '', config.milestoneStatuses.length ? t('tree.matches_of', { n: matches.size, total: members.length }) : t('tree.records', { n: members.length }))); tree.append(header);
+    const header = el('div', 'tree-header'); header.append(el('span', '', t('tree.header')), el('span', '', msFiltering ? t('tree.matches_of', { n: matches.size, total: members.length }) : t('tree.records', { n: members.length }))); tree.append(header);
     const roots = children.get(null) ?? [];
-    if (roots.length) tree.append(...roots.map(node)); else tree.append(el('div', 'empty', config.milestoneStatuses.length ? t('milestone.empty_filtered') : t('milestone.empty')));
+    if (roots.length) tree.append(...roots.map(node)); else tree.append(el('div', 'empty', msFiltering ? t('milestone.empty_filtered') : t('milestone.empty')));
     const detail = el('aside', 'detail milestone-detail');
     renderDetail(detail, ids.has(config.selected) ? doc.byId.get(config.selected) : null);
     layoutBox.append(tree, detail); page.append(layoutBox);
@@ -1033,6 +1174,352 @@
     if (ok) closeAddSubtask();
   }
   function closeAddSubtask() { subtask = null; $('subtask-add').close(); }
+  // Dependencies are editable in any task status. The editor stages Blocked by/Blocking/Relates to as three
+  // local sets and writes them all at once through setRelationships on Save; Cancel just discards the sets.
+  // A direct 2-task blocking cycle is disabled in the list as it's picked (any longer cycle is still caught
+  // by parse() on save and shown as an error).
+  let dependencyTarget = null, dependencyPending = null, dependencyType = 'blocked_by';
+  const dependencyFieldOf = type => type === 'blocked_by' ? 'blockedBy' : type === 'blocking' ? 'blocking' : 'relatesTo';
+  function openDependencyEditor(id) {
+    if (!doc || saving) return;
+    const task = doc.byId.get(id);
+    if (!task) return;
+    dependencyTarget = id;
+    dependencyType = 'blocked_by';
+    dependencyPending = {
+      blockedBy: new Set(task.blocked_by ?? []),
+      blocking: new Set(M.blocks(doc, task).map(x => x.id)),
+      relatesTo: new Set(M.relatedTasks(doc, task).map(x => x.id)),
+    };
+    $('dependency-heading').textContent = t('dependency.heading', { id });
+    $('dependency-error').textContent = '';
+    $('dependency-filter').value = '';
+    $('dependency-editor').querySelector('input[name="dependency-type"][value="blocked_by"]').checked = true;
+    renderDependencyEditor();
+    $('dependency-editor').showModal(); $('dependency-filter').focus();
+  }
+  function renderDependencyEditor() {
+    const task = doc.byId.get(dependencyTarget);
+    if (!task) return;
+    const hints = { blocked_by: 'dependency.blocked_by_hint', blocking: 'dependency.blocking_hint', relates_to: 'dependency.relates_to_hint' };
+    $('dependency-type-hint').textContent = t(hints[dependencyType]);
+    const field = dependencyFieldOf(dependencyType);
+    const pending = dependencyPending[field];
+    // A direct cycle would be created by picking a task that already sits on the opposite blocking side.
+    const opposite = dependencyType === 'blocked_by' ? dependencyPending.blocking : dependencyType === 'blocking' ? dependencyPending.blockedBy : null;
+    const term = $('dependency-filter').value.trim().toLocaleLowerCase();
+    const matches = doc.tasks.filter(x => x.id !== task.id && !x.archived && (!term || x.id.includes(term) || x.title.toLocaleLowerCase().includes(term)));
+    const rows = matches.map(x => {
+      const row = el('label');
+      const box = el('input'); box.type = 'checkbox'; box.value = x.id;
+      box.checked = pending.has(x.id);
+      const wouldCycle = Boolean(opposite?.has(x.id)) && !box.checked;
+      box.disabled = wouldCycle;
+      if (wouldCycle) { row.classList.add('dependency-row-disabled'); row.title = t('dependency.mutual_hint'); }
+      box.addEventListener('change', () => { box.checked ? pending.add(x.id) : pending.delete(x.id); renderDependencyEditor(); });
+      row.append(box, el('span', 'mono', '#' + x.id), el('span', '', x.title));
+      return row;
+    });
+    $('dependency-list').replaceChildren(...(rows.length ? rows : [el('div', 'empty', t('picker.nothing'))]));
+  }
+  async function saveDependencyEditor() {
+    if (!dependencyTarget || saving) return;
+    const id = dependencyTarget;
+    const ok = await mutateProject(current => M.setRelationships(current, id, {
+      blockedBy: [...dependencyPending.blockedBy], blocking: [...dependencyPending.blocking], relatesTo: [...dependencyPending.relatesTo],
+    }), t('notice.dependencies_saved', { id }));
+    if (ok) closeDependencyEditor(); else $('dependency-error').textContent = t('save.failed');
+  }
+  function closeDependencyEditor() { dependencyTarget = null; dependencyPending = null; $('dependency-editor').close(); }
+  // Removing one relation from the task page: the trash icon next to each entry. blocked_by/blocking edit
+  // the side that actually stores the field; relates_to may live on either task's own record.
+  function removeRelation(taskId, otherId, kind) {
+    if (!doc || saving) return;
+    const label = kind === 'blocking' ? t('notice.dependencies_saved', { id: otherId }) : t('notice.dependencies_saved', { id: taskId });
+    return mutateProject(current => {
+      if (kind === 'blocked_by') {
+        const set = new Set(current.byId.get(taskId)?.blocked_by ?? []); set.delete(otherId);
+        return M.setRelationships(current, taskId, { blockedBy: [...set] });
+      }
+      if (kind === 'blocking') {
+        const set = new Set(current.byId.get(otherId)?.blocked_by ?? []); set.delete(taskId);
+        return M.setRelationships(current, otherId, { blockedBy: [...set] });
+      }
+      const task = current.byId.get(taskId);
+      const set = new Set(M.relatedTasks(current, task).map(x => x.id)); set.delete(otherId);
+      return M.setRelationships(current, taskId, { relatesTo: [...set] });
+    }, label);
+  }
+  // Labels: three dialogs. "Labels" (label-assign) picks labels for one task, with a search field and a
+  // "Create label" row always at the bottom of the (filtered) list. "Manage labels" (label-manage), reachable
+  // from there or from Settings, lists every label with edit/delete. "New/Edit label" (label-form) is shared
+  // by both creation paths. Dialogs stack (each showModal() lands on top), so the one underneath is simply
+  // left open and re-rendered once the one on top closes.
+  let labelTarget = null, labelForm = null;
+  // Toggles one label on the current assign target and reports whether the mutation went through.
+  async function toggleLabelAssign(labelId, checked) {
+    const set = new Set(doc.byId.get(labelTarget)?.labels ?? []);
+    checked ? set.add(labelId) : set.delete(labelId);
+    return mutateProject(current2 => M.setTaskLabels(current2, labelTarget, [...set]), t('notice.labels_saved', { id: labelTarget }));
+  }
+  function renderLabelAssign() {
+    const task = doc.byId.get(labelTarget);
+    if (!task) return;
+    const rawTerm = $('label-assign-filter').value.trim();
+    const term = rawTerm.toLocaleLowerCase();
+    const current = new Set(task.labels ?? []);
+    const matches = doc.labels.filter(l => !term || l.title.toLocaleLowerCase().includes(term));
+    const rows = matches.map(l => {
+      const row = el('label');
+      const box = el('input'); box.type = 'checkbox'; box.value = l.id; box.checked = current.has(l.id);
+      box.addEventListener('change', async () => {
+        box.disabled = true;
+        const ok = await toggleLabelAssign(l.id, box.checked);
+        if (ok) renderLabelAssign(); else { box.checked = !box.checked; box.disabled = false; }
+      });
+      const swatch = el('span', 'label-swatch'); swatch.style.background = l.color;
+      row.append(box, swatch, el('span', '', l.title));
+      return row;
+    });
+    // The typed text is only appended to "Create label" when nothing in the list matches it — with any
+    // match shown above, the row stays generic (the match itself is the obvious thing to pick).
+    const create = button(rawTerm && !matches.length ? t('label.create_row_named', { title: rawTerm }) : t('label.create_row'), () => openLabelForm({ presetTitle: rawTerm, returnTo: 'assign' }), 'create-task-row');
+    $('label-assign-list').replaceChildren(...(rows.length ? rows : term ? [] : [el('div', 'empty', t('label.none_yet'))]), create);
+  }
+  // Enter in the search field: an exact (case-insensitive) name match toggles that label and closes the
+  // dialog — the fast path for "type the label name, hit Enter". No exact match but the text matches nothing
+  // at all in the list opens "Create label" prefilled with it, same as clicking the row would. A partial
+  // match with no exact hit is still an ambiguous, in-progress search, so Enter does nothing.
+  async function handleLabelAssignEnter(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const rawTerm = $('label-assign-filter').value.trim();
+    if (!rawTerm || !labelTarget) return;
+    const term = rawTerm.toLocaleLowerCase();
+    const exact = doc.labels.find(l => l.title.toLocaleLowerCase() === term);
+    if (exact) {
+      const current = new Set(doc.byId.get(labelTarget)?.labels ?? []);
+      const ok = await toggleLabelAssign(exact.id, !current.has(exact.id));
+      if (ok) closeLabelAssign();
+      return;
+    }
+    if (!doc.labels.some(l => l.title.toLocaleLowerCase().includes(term))) openLabelForm({ presetTitle: rawTerm, returnTo: 'assign' });
+  }
+  // A registry with no "## Labels" section at all gets the default set the first time the user actually
+  // looks at labels (opens either dialog below) — never automatically, and never for a project that already
+  // has a (possibly empty) Labels section of its own.
+  async function ensureLabelsSeeded() {
+    if (!doc || !M.needsLabelSeed(doc)) return;
+    await mutateProject(current => M.seedDefaultLabels(current), t('notice.labels_seeded'));
+  }
+  async function openLabelAssign(id) {
+    if (!doc || saving) return;
+    await ensureLabelsSeeded();
+    labelTarget = id;
+    $('label-assign-context').textContent = doc.byId.get(id)?.title ?? '';
+    $('label-assign-filter').value = '';
+    renderLabelAssign();
+    $('label-assign').showModal(); $('label-assign-filter').focus();
+  }
+  function closeLabelAssign() { labelTarget = null; $('label-assign').close(); }
+  function renderLabelManage() {
+    $('label-manage-list').replaceChildren(...doc.labels.map(l => {
+      const row = el('div', 'label-manage-row');
+      const swatch = el('span', 'label-swatch'); swatch.style.background = l.color;
+      const edit = button('✎', () => openLabelForm({ id: l.id, returnTo: 'manage' }), 'milestone-edit');
+      edit.title = t('label.edit_title', { title: l.title }); edit.setAttribute('aria-label', edit.title);
+      const del = button('🗑', async () => {
+        const n = doc.tasks.filter(x => x.labels?.includes(l.id)).length;
+        if (!confirm(t('label.confirm_delete', { title: l.title, n }))) return;
+        const ok = await mutateProject(current2 => M.deleteLabel(current2, l.id), t('notice.label_deleted', { id: l.id }));
+        if (ok) { renderLabelManage(); if ($('label-assign').open) renderLabelAssign(); }
+      }, 'milestone-edit danger-action');
+      del.title = t('label.delete_title', { title: l.title }); del.setAttribute('aria-label', del.title);
+      row.append(swatch, el('span', 'label-manage-title', l.title), edit, del);
+      return row;
+    }));
+    if (!doc.labels.length) $('label-manage-list').append(el('div', 'empty', t('label.none_yet')));
+  }
+  async function openLabelManage() {
+    if (!doc || saving) return;
+    await ensureLabelsSeeded();
+    renderLabelManage();
+    $('label-manage').showModal();
+  }
+  function closeLabelManage() { $('label-manage').close(); }
+  function renderLabelPalette() {
+    const current = $('label-form-color').value, isCustom = !M.presetColors.includes(current);
+    const swatches = M.presetColors.map(color => {
+      const b = button('', () => { $('label-form-color').value = color; renderLabelPalette(); }, 'label-preset' + (color === current ? ' selected' : ''));
+      b.style.background = color; b.title = color; return b;
+    });
+    const custom = button('+', () => $('label-form-color-input').click(), 'label-preset label-preset-custom' + (isCustom ? ' selected' : ''));
+    custom.style.background = isCustom ? current : '#ffffff'; custom.title = t('label.custom_color'); custom.setAttribute('aria-label', custom.title);
+    $('label-form-palette').replaceChildren(...swatches, custom);
+  }
+  function openLabelForm({ id = null, presetTitle = '', returnTo }) {
+    const l = id ? doc.byLabel.get(id) : null;
+    labelForm = { id, returnTo };
+    $('label-form-heading').textContent = id ? t('label.edit_heading') : t('label.new_heading');
+    $('label-form-title').value = l ? l.title : presetTitle;
+    $('label-form-color').value = l ? l.color : M.presetColors[0];
+    $('label-form-error').textContent = '';
+    renderLabelPalette();
+    $('label-form').showModal(); $('label-form-title').focus();
+  }
+  function closeLabelForm() { labelForm = null; $('label-form').close(); }
+  async function saveLabelForm(event) {
+    event.preventDefault(); if (!labelForm || saving) return;
+    const title = $('label-form-title').value.trim(), color = $('label-form-color').value;
+    if (!title) { $('label-form-error').textContent = t('error.title_length'); return; }
+    const { id, returnTo } = labelForm;
+    if (id) {
+      const ok = await mutateProject(current2 => M.editLabel(current2, id, title, color), t('notice.label_updated', { id }));
+      if (!ok) { $('label-form-error').textContent = t('save.failed'); return; }
+    } else {
+      let newId = null;
+      const ok = await mutateProject(current2 => { const added = M.addLabel(current2, { title, color }); newId = added.id; return added.changes; }, t('notice.label_added', { id: '' }));
+      if (!ok) { $('label-form-error').textContent = t('save.failed'); return; }
+      if (returnTo === 'assign' && labelTarget && newId) {
+        const set = new Set(doc.byId.get(labelTarget)?.labels ?? []); set.add(newId);
+        await mutateProject(current2 => M.setTaskLabels(current2, labelTarget, [...set]), t('notice.labels_saved', { id: labelTarget }));
+      }
+    }
+    closeLabelForm();
+    if ($('label-assign').open) renderLabelAssign();
+    if ($('label-manage').open) renderLabelManage();
+  }
+  // Task Relationship Diagram: a filtered, capped subgraph rendered as inline SVG (diagram.js does the layout).
+  function diagramScope() {
+    const all = doc.tasks.filter(x => !x.archived);
+    if (!config.diagramRoot || !doc.byId.has(config.diagramRoot)) return all;
+    const edges = Diagram.edgesFromTasks(all);
+    const adjacency = new Map(all.map(x => [x.id, []]));
+    for (const e of edges) { adjacency.get(e.from)?.push(e.to); adjacency.get(e.to)?.push(e.from); }
+    const seen = new Set([config.diagramRoot]), queue = [config.diagramRoot];
+    while (queue.length) { const id = queue.shift(); for (const n of adjacency.get(id) ?? []) if (!seen.has(n)) { seen.add(n); queue.push(n); } }
+    return all.filter(x => seen.has(x.id));
+  }
+  function renderDiagramRootOptions() {
+    options($('diagram-root'), [['', t('diagram.root_all')], ...doc.tasks.filter(x => !x.archived).map(x => [x.id, `#${x.id} ${x.title}`])], config.diagramRoot ?? '');
+  }
+  function renderDiagramRelationships() {
+    const names = { parent: t('diagram.legend_parent'), blocked_by: t('diagram.legend_blocked_by'), relates_to: t('diagram.legend_relates_to') };
+    renderCheckPicker($('diagram-relationships-summary'), $('diagram-relationships-options'), M.edgeTypes.map(type => [type, names[type]]), config.diagramRelationships, t('diagram.all_relationships'), selected => {
+      config.diagramRelationships = selected; renderDiagram(); saveConfig();
+    });
+  }
+  function renderDiagramMilestones() {
+    const items = doc.milestones.map(m => [m.id, `${m.id} · ${m.title}`]);
+    renderCheckPicker($('diagram-milestones-summary'), $('diagram-milestones-options'), items, config.diagramMilestones, t('filter.all_milestones'), selected => {
+      config.diagramMilestones = selected; renderDiagram(); saveConfig();
+    });
+  }
+  function renderDiagramFilteredMode() {
+    const modes = [['dim', t('diagram.mode_dim')], ['hide', t('diagram.mode_hide')]];
+    $('diagram-filtered-mode').replaceChildren(...modes.map(([value, text]) => {
+      const b = button(text, () => { config.diagramFilteredMode = value; renderDiagramFilteredMode(); renderDiagramCanvas(); saveConfig(); });
+      b.classList.toggle('active', config.diagramFilteredMode === value);
+      b.setAttribute('aria-pressed', String(config.diagramFilteredMode === value));
+      return b;
+    }));
+  }
+  const EDGE_STYLE = { parent: { dash: '4 3', arrow: false, cls: 'edge-parent' }, blocked_by: { dash: '', arrow: true, cls: 'edge-blocked' }, relates_to: { dash: '2 4', arrow: false, cls: 'edge-relates' } };
+  function legendItem(cls, text) { const row = el('span', 'legend-item'); row.append(el('span', 'legend-line ' + cls), el('span', '', text)); return row; }
+  function setDiagramZoom(value) {
+    config.diagramZoom = Math.min(2.5, Math.max(0.4, Math.round(value * 20) / 20));
+    renderDiagramCanvas(); saveConfig();
+  }
+  function renderDiagramCanvas() {
+    const preScope = diagramScope();
+    const relTypes = config.diagramRelationships.length ? config.diagramRelationships : M.edgeTypes;
+    let scope = preScope;
+    if (config.diagramHideIsolated) {
+      const connected = new Set();
+      for (const e of Diagram.edgesFromTasks(preScope).filter(e => relTypes.includes(e.type))) { connected.add(e.from); connected.add(e.to); }
+      scope = preScope.filter(x => connected.has(x.id));
+    }
+    const hasStatusFilter = config.diagramStatuses.length > 0, hasMilestoneFilter = config.diagramMilestones.length > 0;
+    const hasFilter = hasStatusFilter || hasMilestoneFilter;
+    const matches = x => (!hasStatusFilter || config.diagramStatuses.includes(x.status)) && (!hasMilestoneFilter || config.diagramMilestones.includes(M.milestoneOf(doc, x)));
+    const kept = hasFilter ? scope.filter(matches) : scope;
+    const mode = config.diagramFilteredMode;
+    const drawTasks = hasFilter && mode !== 'hide' ? scope : kept;
+    const dimmedIds = new Set(hasFilter && mode === 'dim' ? scope.filter(x => !matches(x)).map(x => x.id) : []);
+    const edges = Diagram.edgesFromTasks(drawTasks).filter(e => relTypes.includes(e.type));
+    const nodeSize = config.diagramShowNames ? { nodeWidth: 168, nodeHeight: 56 } : { nodeWidth: 64, nodeHeight: 32 };
+    const layout = Diagram.computeLayout(drawTasks, edges, { limit: config.diagramLimit, ...nodeSize });
+    const canvas = $('diagram-canvas'); canvas.replaceChildren();
+    $('diagram-note').textContent = !layout.nodes.length ? t('diagram.empty') : layout.truncated ? t('diagram.truncated', { shown: layout.shown, total: layout.total }) : '';
+    if (!layout.nodes.length) return;
+    const ns = 'http://www.w3.org/2000/svg', pad = 24, zoom = config.diagramZoom;
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${layout.width + pad * 2} ${layout.height + pad * 2}`);
+    svg.setAttribute('width', (layout.width + pad * 2) * zoom); svg.setAttribute('height', (layout.height + pad * 2) * zoom);
+    const defs = document.createElementNS(ns, 'defs');
+    defs.innerHTML = '<marker id="diagram-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="diagram-arrowhead"/></marker>';
+    const g = document.createElementNS(ns, 'g'); g.setAttribute('transform', `translate(${pad},${pad})`);
+    const pos = new Map(layout.nodes.map(n => [n.id, n]));
+    for (const e of layout.edges) {
+      const a = pos.get(e.from), b = pos.get(e.to); if (!a || !b) continue;
+      const style = EDGE_STYLE[e.type];
+      const line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', a.x + layout.nodeWidth / 2); line.setAttribute('y1', a.y + layout.nodeHeight);
+      line.setAttribute('x2', b.x + layout.nodeWidth / 2); line.setAttribute('y2', b.y);
+      line.setAttribute('class', 'diagram-edge ' + style.cls);
+      if (style.dash) line.setAttribute('stroke-dasharray', style.dash);
+      if (style.arrow) line.setAttribute('marker-end', 'url(#diagram-arrow)');
+      g.append(line);
+    }
+    for (const n of layout.nodes) {
+      const task = doc.byId.get(n.id); if (!task) continue;
+      const node = document.createElementNS(ns, 'g');
+      node.setAttribute('class', 'diagram-node status-' + task.status + (dimmedIds.has(n.id) ? ' dimmed' : ''));
+      node.setAttribute('transform', `translate(${n.x},${n.y})`);
+      node.addEventListener('click', () => openTaskPage(n.id));
+      const rect = document.createElementNS(ns, 'rect'); rect.setAttribute('width', layout.nodeWidth); rect.setAttribute('height', layout.nodeHeight); rect.setAttribute('rx', 8);
+      node.append(rect);
+      const idText = document.createElementNS(ns, 'text'); idText.setAttribute('x', 8); idText.setAttribute('class', 'mono'); idText.textContent = '#' + n.id;
+      if (config.diagramShowNames) {
+        idText.setAttribute('y', 20);
+        const titleText = document.createElementNS(ns, 'text'); titleText.setAttribute('x', 8); titleText.setAttribute('y', 40);
+        titleText.textContent = task.title.length > 22 ? task.title.slice(0, 21) + '…' : task.title;
+        node.append(titleText);
+      } else {
+        idText.setAttribute('y', config.diagramShowLabels && task.labels?.length ? layout.nodeHeight / 2 : layout.nodeHeight / 2 + 4);
+      }
+      node.append(idText);
+      if (config.diagramShowLabels && task.labels?.length) {
+        const compact = !config.diagramShowNames;
+        const dotR = compact ? 3 : 4, dotGap = compact ? 10 : 14, dotY = compact ? layout.nodeHeight - 8 : layout.nodeHeight - 10;
+        task.labels.forEach((id, i) => {
+          const l = doc.byLabel.get(id); if (!l) return;
+          const dot = document.createElementNS(ns, 'circle');
+          dot.setAttribute('cx', 8 + dotR + i * dotGap); dot.setAttribute('cy', dotY); dot.setAttribute('r', dotR);
+          dot.setAttribute('fill', l.color); dot.setAttribute('class', 'diagram-label-dot');
+          node.append(dot);
+        });
+      }
+      const labelNames = (task.labels ?? []).map(id => doc.byLabel.get(id)?.title).filter(Boolean);
+      const titleNode = document.createElementNS(ns, 'title');
+      titleNode.textContent = `#${n.id} ${task.title}` + (labelNames.length ? ` (${labelNames.join(', ')})` : '');
+      node.append(titleNode); g.append(node);
+    }
+    svg.append(defs, g); canvas.append(svg);
+  }
+  function renderDiagram() {
+    renderDiagramRootOptions(); $('diagram-root').value = config.diagramRoot ?? '';
+    $('diagram-limit').value = config.diagramLimit;
+    $('diagram-show-names').checked = config.diagramShowNames;
+    $('diagram-show-labels').checked = config.diagramShowLabels;
+    $('diagram-hide-isolated').checked = config.diagramHideIsolated;
+    renderDiagramRelationships();
+    renderDiagramMilestones();
+    renderDiagramFilteredMode();
+    renderStatusPicker($('diagram-status-summary'), $('diagram-status-options'), config.diagramStatuses, selected => { config.diagramStatuses = selected; renderDiagram(); saveConfig(); });
+    $('diagram-legend').replaceChildren(legendItem('edge-parent', t('diagram.legend_parent')), legendItem('edge-blocked', t('diagram.legend_blocked_by')), legendItem('edge-relates', t('diagram.legend_relates_to')));
+    renderDiagramCanvas();
+  }
   function renderTaskPage(task) {
     const target = $('task-page'); target.replaceChildren();
     const parts = taskParts(task);
@@ -1045,10 +1532,15 @@
     crumbs.append(el('span', 'mono', '#' + task.id));
     nav.append(crumbs);
     const top = el('div', 'detail-title'); top.append(copyControl('#' + task.id), el('span', 'kind-label', task.kind === 'feature' ? 'FEATURE' : 'TASK'), ...badges(task));
-    main.append(top, el('h2', '', task.title), el('h3', '', t('task.description')), parts.description);
+    main.append(top, el('h2', '', task.title));
+    const labelsRow = taskLabelsRow(task); if (labelsRow) main.append(labelsRow);
+    main.append(el('h3', '', t('task.description')), parts.description);
     main.append(parts.attachments(false));
     if (parts.result) main.append(el('h3', '', t('task.result')), parts.result);
     if (parts.sources) main.append(el('h3', '', t('task.sources')), parts.sources);
+    if (parts.blockedBy) main.append(el('h3', '', t('dependency.blocked_by')), parts.blockedBy);
+    if (parts.blocks) main.append(el('h3', '', t('dependency.blocks_label')), parts.blocks);
+    if (parts.related) main.append(el('h3', '', t('dependency.related_label')), parts.related);
     if (parts.children.length) {
       main.append(el('h3', '', t('task.subtasks')));
       if (parts.progress) main.append(parts.progress);
@@ -1057,7 +1549,7 @@
         const row = el('div', 'tree-row'); row.dataset.task = c.id;
         const pick = button('', () => openTaskPage(c.id), 'tree-select');
         pick.append(el('span', 'mono', '#' + c.id + (c.kind === 'feature' ? ' · ' + t('kind.feature_tag') : '')), el('span', '', c.title));
-        row.append(el('span', 'expander', ''), pick, ...badges(c)); list.append(row);
+        row.append(el('span', 'expander', ''), pick, ...rowBadges(c)); list.append(row);
       }
       main.append(list);
     }
@@ -1293,12 +1785,12 @@
   // The language toggle stores an explicit choice; static strings are re-applied and dynamic ones re-rendered.
   $('lang').addEventListener('click', () => { config.lang = I18n.language === 'ru' ? 'en' : 'ru'; applyLanguage(); notice(''); render(); saveConfig(); });
   $('search').addEventListener('input', () => { config.search = $('search').value; renderTree(); saveConfig(); });
-  for (const field of ['milestone', 'sort']) $(field).addEventListener('change', () => { config[field] = $(field).value; renderTree(); saveConfig(); });
+  $('sort-dir').addEventListener('click', () => { config.sortDir = config.sortDir === 'asc' ? 'desc' : 'asc'; renderSortDirButton(config.sortDir); renderTree(); saveConfig(); });
   $('show-archive').addEventListener('change', () => { config.showArchive = $('show-archive').checked; renderTree(); saveConfig(); });
   $('hide-done-dashboard').addEventListener('change', () => { config.hideDone = $('hide-done-dashboard').checked; render(); saveConfig(); });
   $('expand').addEventListener('click', () => { config.expanded = doc.tasks.map(task => task.id); renderTree(); saveConfig(); });
   $('collapse').addEventListener('click', () => { config.expanded = []; renderTree(); saveConfig(); });
-  $('clear-filters').addEventListener('click', () => { config.search = ''; config.statuses = []; config.milestone = 'all'; render(); saveConfig(); });
+  $('clear-filters').addEventListener('click', () => { config.search = ''; config.statuses = []; config.milestone = 'all'; config.labels = []; config.authors = []; config.assignees = []; render(); saveConfig(); });
   $('close-editor').addEventListener('click', closeEditor); $('cancel-editor').addEventListener('click', closeEditor);
   $('editor').addEventListener('cancel', e => { e.preventDefault(); closeEditor(); });
   $('task-form').addEventListener('submit', saveTask);
@@ -1321,6 +1813,40 @@
   $('comment-form').addEventListener('submit', saveComment);
   $('close-comment').addEventListener('click', closeCommentEditor); $('cancel-comment').addEventListener('click', closeCommentEditor);
   $('comment-editor').addEventListener('cancel', e => { e.preventDefault(); closeCommentEditor(); });
+  $('close-dependency').addEventListener('click', closeDependencyEditor); $('cancel-dependency').addEventListener('click', closeDependencyEditor);
+  $('dependency-editor').addEventListener('cancel', e => { e.preventDefault(); closeDependencyEditor(); });
+  $('save-dependency').addEventListener('click', saveDependencyEditor);
+  $('dependency-filter').addEventListener('input', renderDependencyEditor);
+  for (const radio of $('dependency-type-tabs').querySelectorAll('input[name="dependency-type"]')) {
+    radio.addEventListener('change', () => { dependencyType = radio.value; renderDependencyEditor(); });
+  }
+  $('close-label-assign').addEventListener('click', closeLabelAssign); $('close-label-assign-bottom').addEventListener('click', closeLabelAssign);
+  $('label-assign').addEventListener('cancel', e => { e.preventDefault(); closeLabelAssign(); });
+  $('label-assign-filter').addEventListener('input', renderLabelAssign);
+  $('label-assign-filter').addEventListener('keydown', handleLabelAssignEnter);
+  $('open-label-manage').addEventListener('click', openLabelManage);
+  $('new-label-manage').addEventListener('click', () => openLabelForm({ returnTo: 'manage' }));
+  $('close-label-manage').addEventListener('click', closeLabelManage); $('close-label-manage-bottom').addEventListener('click', closeLabelManage);
+  $('label-manage').addEventListener('cancel', e => { e.preventDefault(); closeLabelManage(); });
+  $('label-form-form').addEventListener('submit', saveLabelForm);
+  $('close-label-form').addEventListener('click', closeLabelForm); $('cancel-label-form').addEventListener('click', closeLabelForm);
+  $('label-form').addEventListener('cancel', e => { e.preventDefault(); closeLabelForm(); });
+  $('label-form-color-input').addEventListener('input', () => { $('label-form-color').value = $('label-form-color-input').value; renderLabelPalette(); });
+  $('settings-gear').addEventListener('click', () => {
+    const r = $('settings-gear').getBoundingClientRect();
+    showMenu([{ label: t('label.manage_heading'), run: openLabelManage }], r.right + 8, r.top, t('settings.title'));
+  });
+  $('diagram-root').addEventListener('change', () => { config.diagramRoot = $('diagram-root').value || null; renderDiagramCanvas(); saveConfig(); });
+  $('diagram-limit').addEventListener('change', () => { config.diagramLimit = Math.max(1, Math.min(500, Number($('diagram-limit').value) || 60)); $('diagram-limit').value = config.diagramLimit; renderDiagramCanvas(); saveConfig(); });
+  $('diagram-show-names').addEventListener('change', () => { config.diagramShowNames = $('diagram-show-names').checked; renderDiagramCanvas(); saveConfig(); });
+  $('diagram-show-labels').addEventListener('change', () => { config.diagramShowLabels = $('diagram-show-labels').checked; renderDiagramCanvas(); saveConfig(); });
+  $('diagram-hide-isolated').addEventListener('change', () => { config.diagramHideIsolated = $('diagram-hide-isolated').checked; renderDiagramCanvas(); saveConfig(); });
+  $('diagram-zoom-in').addEventListener('click', () => setDiagramZoom(config.diagramZoom + 0.15));
+  $('diagram-zoom-out').addEventListener('click', () => setDiagramZoom(config.diagramZoom - 0.15));
+  $('diagram-clear-filters').addEventListener('click', () => {
+    config.diagramRoot = null; config.diagramStatuses = []; config.diagramRelationships = []; config.diagramMilestones = [];
+    renderDiagram(); saveConfig();
+  });
   window.addEventListener('beforeunload', e => { if (saving || pendingConfig || configWrites || (editing && editing.original !== formState())) { e.preventDefault(); e.returnValue = ''; } });
   document.addEventListener('visibilitychange', () => { if (document.hidden) flushConfig(); });
   // The registry is re-read every 2.5 s while the tab is visible and no form is open.

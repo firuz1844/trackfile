@@ -33,9 +33,25 @@ id: "M02"
 title: "Second milestone"
 \`\`\`
 
+## Labels
+
+### LABEL L01
+\`\`\`yaml
+id: "L01"
+title: "Bug"
+color: "#ef4444"
+\`\`\`
+
+### LABEL L02
+\`\`\`yaml
+id: "L02"
+title: "Docs"
+color: "#3b82f6"
+\`\`\`
+
 ## Tasks
 
-${task('001', 'Feature one', { kind: 'feature', milestone: 'M01' }, 'A feature with subtasks.')}${task('002', 'Free subtask', { parent: '001', sources: ['docs/design.md', 'src/app.js'] }, 'Description of the free task.\n\n#### Check\n- item one')}${task('003', 'Done subtask', { parent: '001', status: 'done', author: 'Codex', completed_at: '2025-01-03T10:00:00+00:00', branch: 'main', commit: 'abc1234', result: 'Verified by tests.' })}${task('004', 'Removed subtask', { parent: '001', status: 'removed' })}${task('005', 'Task in review', { milestone: 'M02', status: 'review', assignee: 'Claude' })}${task('006', 'Task in progress', { milestone: 'M02', status: 'in_progress', assignee: 'Codex' })}${task('007', 'Root task without milestone', {}, 'Mentions virtualization of long lists.')}${task('008', 'Old closed task', { milestone: 'M01', status: 'done', completed_at: '2025-01-05T10:00:00+00:00' })}${task('009', 'Done feature with open child', { kind: 'feature', milestone: 'M02', status: 'done', completed_at: '2025-01-05T10:00:00+00:00' })}${task('010', 'Open child of done feature', { parent: '009' })}`;
+${task('001', 'Feature one', { kind: 'feature', milestone: 'M01' }, 'A feature with subtasks.')}${task('002', 'Free subtask', { parent: '001', sources: ['docs/design.md', 'src/app.js'], labels: ['L01'] }, 'Description of the free task.\n\n#### Check\n- item one')}${task('003', 'Done subtask', { parent: '001', status: 'done', author: 'Codex', completed_at: '2025-01-03T10:00:00+00:00', branch: 'main', commit: 'abc1234', result: 'Verified by tests.' })}${task('004', 'Removed subtask', { parent: '001', status: 'removed' })}${task('005', 'Task in review', { milestone: 'M02', status: 'review', assignee: 'Claude', blocked_by: ['006'] })}${task('006', 'Task in progress', { milestone: 'M02', status: 'in_progress', assignee: 'Codex' })}${task('007', 'Root task without milestone', { relates_to: ['008'] }, 'Mentions virtualization of long lists.')}${task('008', 'Old closed task', { milestone: 'M01', status: 'done', completed_at: '2025-01-05T10:00:00+00:00' })}${task('009', 'Done feature with open child', { kind: 'feature', milestone: 'M02', status: 'done', completed_at: '2025-01-05T10:00:00+00:00' })}${task('010', 'Open child of done feature', { parent: '009' })}`;
 const comments = () => `#### COMMENT 1 [ ]
 \`\`\`yaml
 id: 1

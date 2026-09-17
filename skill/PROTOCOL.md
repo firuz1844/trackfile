@@ -52,7 +52,14 @@ Trackfile is the task registry of this repository: `TRACKFILE.md` at the reposit
 - `branch`, `commit`: the real branch and an existing commit of the implementation, or `null`. Never a placeholder, never a guessed hash.
 - `result`: what was done, how it was verified, what remains or is not covered. Written when the task moves to `review`; updated when the task is resumed.
 - `sources`: repository-relative paths to the documents, code and tests that back the task's status and result (design docs, ADRs, specs, changed source files, tests). Every task that reaches `review` must have the evidence for its result in `sources`; when the status of an existing task rests on a document or code, add the path here rather than describing it in prose only. Markdown documents in this list carry back-link marks (see below). Only repository paths, never URLs.
+- `blocked_by` / `relates_to` (optional): arrays of task IDs — a Finish-Start blocking dependency and a non-blocking, non-hierarchical link. Both are editable at any status through the dashboard's "Relationships" dialog; agents may also set them directly when a task's real blocker is known. A blocking cycle is a format error, like a parent cycle.
+- `labels` (optional): array of `Lxx` IDs referencing `### LABEL Lxx` records (an optional `## Labels` section, `id`/`title`/`color`; `trackfile init` seeds a default set, and so does the dashboard the first time it opens the Labels/Manage labels dialog on a registry with no such section). Managed through the dashboard's "Labels" dialog on a task ("Manage labels" from there or from Settings edits/deletes labels); agents may add/reference them too.
 - A record may carry extra fields a project defines (for example an import audit reference); keep them untouched.
+
+### Text and attachments
+
+- Every piece of free text an agent writes into the registry or into comments — task descriptions, `result`, milestone descriptions, `#### COMMENT N` bodies — is Markdown (headings, lists, code, quotes, tables, links, images): the dashboard renders it as such, so plain-text dumps or raw HTML display wrong. Keep `#`, `##`, `###` for the document structure as noted above; use `####` or plain paragraphs inside a record's own text.
+- An agent may attach files to the task it works on by saving them under `.trackfile/tasks/NNN/` (e.g. `.trackfile/tasks/NNN/some_image.png`), the same directory as `comments.md`. Prefer a compressed format for images (JPEG, or PNG only when transparency is needed; keep the long side reasonable, similarly to the dashboard's own client-side compression) so the repository does not carry oversized binaries. Reference an attached image from the description or a comment with standard Markdown, e.g. `![name](.trackfile/tasks/NNN/some_image.png)`, and set its display width to 320px by default with the dashboard's `#w=` suffix: `![name](.trackfile/tasks/NNN/some_image.png#w=320)`.
 
 ### Who changes what
 

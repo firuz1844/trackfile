@@ -286,3 +286,136 @@ test('setParent moves a task under another parent, rejects cycles, self and remo
   assert.throws(() => M.setParent(d, '002', '004', now), code('parent_unavailable'));
   assert.equal(after(d, M.setParent(d, '002', null, now)).byId.get('002').parent, null);
 });
+test('blocked_by/relates_to: parsed, derived views, validation and setDependencies', () => {
+  const d = parsed();
+  assert.deepEqual(d.byId.get('005').blocked_by, ['006']);
+  assert.deepEqual(M.blockedBy(d, d.byId.get('005')).map(t => t.id), ['006']);
+  assert.deepEqual(M.blocks(d, d.byId.get('006')).map(t => t.id), ['005'], 'blocks is derived, never stored');
+  assert.equal(M.isBlocked(d, d.byId.get('005')), true, '006 is in_progress');
+  assert.equal(M.isBlocked(d, d.byId.get('006')), false, 'no blockers');
+  // relates_to is stored on 007 only; 008 sees it through the derived reverse lookup.
+  assert.deepEqual(M.relatedTasks(d, d.byId.get('007')).map(t => t.id), ['008']);
+  assert.deepEqual(M.relatedTasks(d, d.byId.get('008')).map(t => t.id), ['007']);
+  assert.throws(() => withRegistry(source.replace('blocked_by: [\"006\"]', 'blocked_by: [\"999999\"]')), code('dependency_missing'));
+  assert.throws(() => withRegistry(source.replace('blocked_by: [\"006\"]', 'blocked_by: [\"005\"]')), code('dependency_self'));
+  assert.throws(() => withRegistry(source.replace('blocked_by: [\"006\"]', 'blocked_by: [\"006\", \"006\"]')), code('dependency_format'));
+  assert.throws(() => withRegistry(source.replace('blocked_by: [\"006\"]', 'blocked_by: [1]')), code('dependency_format'));
+  // A cycle: 006 also blocked by 005 (which is already blocked by 006).
+  assert.throws(() => withRegistry(source.replace('assignee: \"Codex\"\ncreated_at', 'assignee: \"Codex\"\nblocked_by: [\"005\"]\ncreated_at')), code('dependency_cycle'));
+  const withDeps = after(d, M.setDependencies(d, '007', { blockedBy: ['008'], relatesTo: ['002', '002'] }, now));
+  const t = withDeps.byId.get('007');
+  assert.deepEqual(t.blocked_by, ['008']); assert.deepEqual(t.relates_to, ['002']); assert.equal(t.updated_at, now);
+  assert.deepEqual(M.setDependencies(d, '007', {}, now), {}, 'no fields given is a no-op');
+  assert.throws(() => M.setDependencies(d, '999999', { blockedBy: [] }, now), code('task_not_found'));
+});
+test('setRelationships: reconciles blocking (reverse blocked_by) and relates_to (either side) as a diff', () => {
+  const d = parsed();
+  // 006 is currently blocked by nothing and blocks 005 (005.blocked_by = ["006"]).
+  // Ask 006 to block 002 as well and stop blocking 005: 005 loses 006, 002 gains it.
+  const afterBlocking = after(d, M.setRelationships(d, '006', { blocking: ['002'] }, now));
+  assert.deepEqual(afterBlocking.byId.get('005').blocked_by, [], '006 no longer blocks 005');
+  assert.deepEqual(afterBlocking.byId.get('002').blocked_by, ['006'], '006 now blocks 002');
+  assert.deepEqual(M.blocks(afterBlocking, afterBlocking.byId.get('006')).map(t => t.id), ['002']);
+  // 007 relates_to ["008"]; 008 holds nothing of its own. Drop 008, add 002 as related.
+  const afterRelates = after(d, M.setRelationships(d, '007', { relatesTo: ['002'] }, now));
+  assert.deepEqual(afterRelates.byId.get('007').relates_to, ['002']);
+  assert.deepEqual(afterRelates.byId.get('008').relates_to ?? [], []);
+  // A relation stored on the *other* side (007 sees 002 only through the reverse lookup, since 002 is the
+  // one whose own relates_to names 007) is removed from wherever it actually lives, not just from the
+  // edited task's own field.
+  const reverseSeeded = after(d, M.setDependencies(d, '002', { relatesTo: ['007'] }, now));
+  assert.deepEqual(M.relatedTasks(reverseSeeded, reverseSeeded.byId.get('007')).map(t => t.id).sort(), ['002', '008']);
+  const afterDrop = after(reverseSeeded, M.setRelationships(reverseSeeded, '007', { relatesTo: ['008'] }, now));
+  assert.deepEqual(afterDrop.byId.get('002').relates_to, [], 'removed from 002, which actually stored it');
+  assert.deepEqual(afterDrop.byId.get('007').relates_to, ['008'], 'the direct relation is untouched');
+  assert.deepEqual(M.relatedTasks(afterDrop, afterDrop.byId.get('007')).map(t => t.id), ['008']);
+  // Mutual blocking is still rejected: 006 blocks 005, so asking 005 to also block 006 is a 2-cycle.
+  assert.throws(() => M.setRelationships(d, '005', { blocking: ['006'] }, now), code('dependency_cycle'));
+  assert.deepEqual(M.setRelationships(d, '007', {}, now), {}, 'no fields given is a no-op');
+  assert.throws(() => M.setRelationships(d, '999999', { blockedBy: [] }, now), code('task_not_found'));
+});
+test('labels: parsed, addLabel/editLabel/deleteLabel, task label validation and assignment', () => {
+  const d = parsed();
+  assert.equal(d.labels.length, 2); assert.deepEqual(d.byId.get('002').labels, ['L01']);
+  assert.throws(() => withRegistry(source.replace('labels: [\"L01\"]', 'labels: [\"L99\"]')), code('label_missing'));
+  assert.throws(() => withRegistry(source.replace('labels: [\"L01\"]', 'labels: [\"L01\", \"L01\"]')), code('label_format'));
+  assert.throws(() => withRegistry(source.replace('color: \"#ef4444\"', 'color: \"red\"')), code('label_color'));
+  const added = M.addLabel(d, { title: 'Urgent', color: '#eab308' }), next = after(d, added.changes);
+  assert.equal(added.id, 'L03'); assert.equal(next.labels.length, 3); assert.equal(next.byLabel.get('L03').title, 'Urgent');
+  assert.throws(() => M.addLabel(d, { title: '', color: '#eab308' }), code('title_length'));
+  assert.throws(() => M.addLabel(d, { title: 'x', color: 'not-a-color' }), code('label_color'));
+  const edited = after(d, M.editLabel(d, 'L01', 'Defect', '#dc2626'));
+  assert.equal(edited.byLabel.get('L01').title, 'Defect'); assert.equal(edited.byLabel.get('L01').color, '#dc2626');
+  assert.throws(() => M.editLabel(d, 'L99', 'x', '#000000'), code('label_not_found'));
+  const withAssignment = after(d, M.setTaskLabels(d, '007', ['L01', 'L02', 'L01'], now));
+  assert.deepEqual(withAssignment.byId.get('007').labels, ['L01', 'L02']); assert.equal(withAssignment.byId.get('007').updated_at, now);
+  assert.deepEqual(M.setTaskLabels(d, '002', ['L01'], now), {}, 'same set is a no-op');
+  assert.throws(() => M.setTaskLabels(d, '999999', ['L01'], now), code('task_not_found'));
+  const deleted = after(d, M.deleteLabel(d, 'L01'));
+  assert.equal(deleted.labels.length, 1); assert.deepEqual(deleted.byId.get('002').labels, [], 'removed from every task that had it');
+  assert.throws(() => M.deleteLabel(d, 'L99'), code('label_not_found'));
+});
+// Migration: registries written before labels existed have no "## Labels" heading at all. addLabel must not
+// fail with no_labels_section — it creates the heading itself, in every plausible shape of an old registry.
+const taskBlock = (id, extra = '') => `### TASK ${id}\n\`\`\`yaml\nid: "${id}"\ntitle: "T${id}"\nkind: "task"\nparent: null\nmilestone: null\nstatus: "to-do"\nauthor: "User"\nassignee: null\ncreated_at: "2025-01-01T10:00:00+00:00"\nupdated_at: "2025-01-01T10:00:00+00:00"\ncompleted_at: null\nbranch: null\ncommit: null\nresult: ""\n${extra}\`\`\`\n`;
+const legacyRegistry = ({ milestones = true, tasks = true } = {}) =>
+  `---\nschema: 1\nproject: "Legacy"\nnext_task: 2\n---\n\n# Legacy — task registry\n\n` +
+  (milestones ? `## Milestones\n\n### MILESTONE M01\n\`\`\`yaml\nid: "M01"\ntitle: "Backlog"\n\`\`\`\n\n` : '') +
+  (tasks ? `## Tasks\n\n${taskBlock('001')}` : '## Tasks\n');
+test('migration: addLabel creates a missing "## Labels" heading — with milestones and tasks, tasks only, and an empty registry', () => {
+  // Old registry, milestones + tasks, no Labels section at all (the exact shape the report described).
+  // addLabel only creates the bare heading here — it never seeds the default set (that is seedDefaultLabels'
+  // job, triggered by the UI, not by every direct call to addLabel).
+  const withBoth = M.parse(legacyRegistry());
+  assert.equal(withBoth.labels.length, 0);
+  const addedBoth = M.addLabel(withBoth, { title: 'Bug', color: '#ef4444' });
+  const nextBoth = after(withBoth, addedBoth.changes);
+  assert.equal(addedBoth.id, 'L01'); assert.equal(nextBoth.labels.length, 1); assert.equal(nextBoth.byLabel.get('L01').color, '#ef4444');
+  assert.match(nextBoth.text, /```\n\n## Labels\n\n### LABEL L01\n\`\`\`yaml\nid: "L01"\ntitle: "Bug"\ncolor: "#ef4444"\n\`\`\`\n\n## Tasks\n/, 'lands right after the last milestone, right before Tasks');
+  assert.equal(nextBoth.byId.get('001').raw, withBoth.byId.get('001').raw, 'the existing task record is untouched');
+  // A second label after migration appends normally, next to the first.
+  const addedSecond = M.addLabel(nextBoth, { title: 'Docs', color: '#3b82f6' });
+  const nextSecond = after(nextBoth, addedSecond.changes);
+  assert.equal(addedSecond.id, 'L02'); assert.equal(nextSecond.labels.length, 2);
+  assert.equal((nextSecond.text.match(/## Labels/g) || []).length, 1, 'no duplicate heading on the second label');
+
+  // No milestones at all: the section lands right before the first task instead.
+  const tasksOnly = M.parse(legacyRegistry({ milestones: false }));
+  const addedTasksOnly = M.addLabel(tasksOnly, { title: 'X', color: '#22c55e' });
+  const nextTasksOnly = after(tasksOnly, addedTasksOnly.changes);
+  assert.equal(nextTasksOnly.labels.length, 1);
+  assert.match(nextTasksOnly.text, /## Labels\n\n### LABEL L01\n```yaml\nid: "L01"\ntitle: "X"\ncolor: "#22c55e"\n```\n\n## Tasks\n\n### TASK 001/);
+
+  // Neither milestones nor tasks yet: nothing to anchor on, the section is appended at the end of the file.
+  const empty = M.parse(legacyRegistry({ milestones: false, tasks: false }));
+  const addedEmpty = M.addLabel(empty, { title: 'Only', color: '#eab308' });
+  const nextEmpty = after(empty, addedEmpty.changes);
+  assert.equal(nextEmpty.labels.length, 1); assert.equal(nextEmpty.byLabel.get('L01').title, 'Only');
+  assert.match(nextEmpty.text, /## Tasks\n\n## Labels\n\n### LABEL L01\n/);
+});
+test('migration: addLabel reuses an existing empty "## Labels" heading instead of creating a duplicate', () => {
+  const withHeading = M.parse(`---\nschema: 1\nproject: "P"\nnext_task: 1\n---\n\n## Milestones\n\n## Labels\n\n## Tasks\n`);
+  const added = after(withHeading, M.addLabel(withHeading, { title: 'X', color: '#ef4444' }).changes);
+  assert.equal(added.labels.length, 1);
+  assert.equal((added.text.match(/## Labels/g) || []).length, 1);
+});
+test('needsLabelSeed/seedDefaultLabels: only a registry with no "## Labels" section at all gets the default set, once', () => {
+  const n = M.defaultLabels.length;
+  // No section at all: needs seeding, and seedDefaultLabels inserts exactly the default set, nothing else.
+  const withBoth = M.parse(legacyRegistry());
+  assert.equal(M.needsLabelSeed(withBoth), true);
+  const seeded = after(withBoth, M.seedDefaultLabels(withBoth));
+  assert.equal(seeded.labels.length, n);
+  assert.deepEqual(seeded.labels.map(l => [l.title, l.color]), M.defaultLabels.map(l => [l.title, l.color]));
+  assert.equal(seeded.byId.get('001').raw, withBoth.byId.get('001').raw, 'the existing task record is untouched');
+  // Seeding again is a no-op: needsLabelSeed is now false, seedDefaultLabels returns no changes.
+  assert.equal(M.needsLabelSeed(seeded), false);
+  assert.deepEqual(M.seedDefaultLabels(seeded), {});
+  // An existing but empty "## Labels" section is left alone — the project already opted in to having one.
+  const withEmptyHeading = M.parse(`---\nschema: 1\nproject: "P"\nnext_task: 1\n---\n\n## Milestones\n\n## Labels\n\n## Tasks\n`);
+  assert.equal(M.needsLabelSeed(withEmptyHeading), false);
+  assert.deepEqual(M.seedDefaultLabels(withEmptyHeading), {});
+  // A registry that already has labels of its own is left alone too.
+  assert.equal(M.needsLabelSeed(parsed()), false);
+  assert.deepEqual(M.seedDefaultLabels(parsed()), {});
+});

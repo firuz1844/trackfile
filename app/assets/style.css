@@ -168,22 +168,31 @@ small,.hint{
   background:var(--soft);
   color:var(--ink)
 }
+/* One uniform icon box for every nav/side-bottom row, so glyphs of very different natural size (◫ ☷ ◈ ◐ ⚙ ?
+ * plus the language SVG) all read as the same size and sit on the same optical center. */
 .nav .icon,.side-bottom .icon{
-  display:inline-grid;
-  place-items:center;
-  width:20px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:24px;
+  height:24px;
+  font-size:16px;
+  line-height:1;
   flex-shrink:0
 }
-.side-bottom a{
+.lang-icon svg{display:block}
+/* The ⚙ glyph draws much smaller within its em-box than ◐ at the same font-size — scale it up so the two
+ * read as the same diameter instead of matching font-size, which visually doesn't. */
+#settings-gear .icon{font-size:25.5px}
+.side-bottom a,.side-bottom button{
   white-space:nowrap;
   display:flex;
   gap:12px;
-  align-items:center
-}
-.side-bottom #theme{
-  display:flex;
-  gap:12px;
-  align-items:center
+  align-items:center;
+  width:100%;
+  padding:8px 12px;
+  border:0;
+  border-radius:8px
 }
 /* Collapsed rail: icons only, labels move into title tooltips. Only for the fixed desktop sidebar. */
 @media(min-width:851px){
@@ -219,7 +228,7 @@ small,.hint{
     align-items:center;
     gap:10px
   }
-  body.sidebar-collapsed .side-bottom #theme,body.sidebar-collapsed .side-bottom a{
+  body.sidebar-collapsed .side-bottom a,body.sidebar-collapsed .side-bottom button{
     justify-content:center;
     padding:9px 0;
     width:44px
@@ -245,16 +254,14 @@ small,.hint{
   margin-left:auto;
   font-size:13px
 }
+/* Moved to the very bottom of the sidebar, below side-bottom (margin-top:auto on side-bottom pushes that
+ * block down; this one just follows right after it in normal flow) — a small, quiet footer, not a callout. */
 .side-note{
-  margin-top:40px;
-  padding:18px 9px;
+  margin-top:14px;
+  padding:12px 9px 0;
   border-top:1px solid var(--line);
-  font-size:14px
-}
-.side-note p{
-  margin-top:10px;
-  color:var(--muted);
-  font-size:13px
+  font-size:11px;
+  color:var(--muted)
 }
 .dot{
   display:inline-block;
@@ -268,13 +275,9 @@ small,.hint{
   margin-top:auto;
   display:flex;
   flex-direction:column;
-  gap:18px;
-  font-size:13px;
+  gap:4px;
+  font-size:13.5px;
   color:var(--muted)
-}
-.side-bottom button{
-  text-align:left;
-  padding-left:0
 }
 main{
   margin-left:230px;
@@ -528,8 +531,18 @@ progress::-moz-progress-bar{
 .tree-row.archived .tree-select{opacity:.6}
 .filters{
   display:flex;
-  gap:10px;
+  flex-wrap:wrap;
+  align-items:stretch;
+  gap:8px;
   margin-bottom:14px
+}
+.filters .toggle{
+  flex-direction:row;
+  align-items:center;
+  gap:8px;
+  white-space:nowrap;
+  font-size:13.5px;
+  margin:0
 }
 input,textarea,select{
   border:1px solid var(--line);
@@ -555,14 +568,17 @@ input[type=search]{
 .filters select{
   max-width:235px
 }
+/* One visual language for every filter dropdown — status, labels, milestone, author, assignee, sort field —
+ * compact by design: a fixed-height pill-cornered summary that just fits its text, not a wide fixed box. */
 .status-filter{
   position:relative;
-  min-width:190px
+  min-width:0
 }
 .status-filter summary{
   box-sizing:border-box;
   height:100%;
-  max-width:260px;
+  min-width:118px;
+  max-width:220px;
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
@@ -572,23 +588,48 @@ input[type=search]{
   background:var(--panel);
   color:var(--ink);
   border-radius:8px;
-  padding:11px 34px 11px 12px
+  padding:9px 28px 9px 12px;
+  font-size:13.5px
 }
 .status-filter summary::-webkit-details-marker{display:none}
-.status-filter summary::after{content:'⌄';position:absolute;right:12px;color:var(--muted)}
+.status-filter summary::after{content:'⌄';position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:12px}
+.status-filter[open]>summary{border-color:var(--accent)}
 .status-options{
   position:absolute;
   z-index:20;
   top:calc(100% + 6px);
   left:0;
   min-width:100%;
-  padding:8px;
+  max-width:280px;
+  max-height:min(340px,60vh);
+  overflow:auto;
+  padding:6px;
   border:1px solid var(--line);
   border-radius:10px;
   background:var(--panel);
   box-shadow:var(--shadow)
 }
-.status-options label{display:flex;align-items:center;gap:8px;padding:7px 8px;white-space:nowrap;cursor:pointer}
+.status-options label{display:flex;align-items:center;gap:8px;padding:6px 8px;white-space:nowrap;cursor:pointer;font-size:13.5px;border-radius:6px}
+.status-options label:hover{background:var(--soft)}
+/* Single-select rows (milestone, sort field): a checkmark on the selected one instead of a radio dot; every
+ * other row is padded by the same amount so the text lines up whether or not it happens to be the checked one. */
+.status-options .radio-item{display:block;width:100%;border:0;background:transparent;text-align:left;border-radius:6px;padding:6px 8px 6px 26px;font-size:13.5px;white-space:nowrap;cursor:pointer;color:var(--ink)}
+.status-options .radio-item:hover{background:var(--soft)}
+.status-options .radio-item.checked{padding-left:8px}
+.status-options .radio-item.checked::before{content:"✓";display:inline-block;width:12px;color:var(--accent);font-weight:700;margin-right:6px}
+/* Sort: a single-select popover (field) plus a small square button toggling asc/desc, styled to match. */
+.sort-control{display:flex;align-items:stretch;gap:6px}
+.sort-control .status-filter summary{min-width:132px}
+.sort-dir{
+  flex:none;
+  width:38px;
+  padding:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:15px;
+  border-radius:8px
+}
 .tree-actions{
   display:flex;
   justify-content:flex-end;
@@ -728,6 +769,23 @@ input[type=search]{
   display:flex;
   justify-content:space-between;
   align-items:center
+}
+/* The task's own labels, in their own small wrapping row right under the title — separate from the status
+ * badges above it, which stay in .detail-title / the task page's top row. */
+.task-labels{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px;
+  margin:-8px 0 16px;
+  font-size:11.5px
+}
+.task-labels-heading{
+  color:var(--muted);
+  font-weight:650;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  margin-right:2px
 }
 .detail dl,.task-side dl{
   display:grid;
@@ -1690,3 +1748,62 @@ body[data-theme=dark]{--prio-low:#f0c94a;--prio-normal:#8b978f;--prio-high:#ff7b
 .lightbox-tools .icon-button:hover,.lightbox-tools .quiet:hover{color:#fff;border-color:#fff}
 .lightbox-tools button{font-size:20px;line-height:1;background:transparent;border:0;color:#ddd;cursor:pointer;padding:0 4px}
 #lightbox-image{display:block;max-width:min(96vw,1400px);max-height:calc(96vh - 44px);object-fit:contain;border-radius:8px;background:#111;cursor:zoom-out}
+/* Labels: a colored chip on task rows, a swatch in pickers, custom colors so no fixed CSS palette applies. */
+/* border-radius:999px is clamped by the spec to exactly half the chip's rendered height, giving a true pill
+ * regardless of font metrics — simpler and more robust than computing the radius from a fixed height. */
+.label-chip{display:inline-block;white-space:nowrap;border-radius:999px;padding:2px 9px;font-size:11px;line-height:1.5;font-weight:500;background:color-mix(in srgb,var(--label-color) 20%,var(--panel));color:var(--label-color);border:1px solid color-mix(in srgb,var(--label-color) 45%,transparent)}
+.blocked-chip{border-color:var(--danger);color:var(--danger)}
+.label-swatch{display:inline-block;width:14px;height:14px;border-radius:4px;flex:none;box-shadow:0 0 0 1px var(--line) inset}
+/* Manage labels: one row per label, swatch + title + edit/delete icon buttons. */
+.label-manage-list{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;max-height:320px;overflow:auto}
+.label-manage-row{display:flex;align-items:center;gap:10px;padding:5px 2px}
+.label-manage-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.label-manage-row .danger-action{color:var(--danger)}
+/* New/edit label: preset palette + a custom-color swatch (last, marked with "+") behind a hidden native color input. */
+.label-color-field{display:flex;flex-direction:column;gap:9px;font-size:14px;margin-bottom:18px}
+.label-presets{display:flex;gap:8px;flex-wrap:wrap}
+.label-preset{width:26px;height:26px;border-radius:6px;border:1px solid var(--line);padding:0;cursor:pointer;box-shadow:0 0 0 2px transparent}
+.label-preset.selected{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
+.label-preset-custom{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:15px;font-weight:700;text-shadow:0 0 3px var(--panel)}
+.color-input-hidden{position:absolute;width:1px;height:1px;padding:0;margin:0;border:0;opacity:0;overflow:hidden;pointer-events:none}
+.info-dot{border:0;background:transparent;color:var(--muted);cursor:help;font-size:14px;padding:0 4px}
+/* Dependency editor: a search filter, a Blocked by/Blocking/Relates to type switch, then one checklist for
+ * the current type. The task page shows the three relation lists with a small trash icon per entry. */
+#dependency-editor .search{display:block;margin-bottom:14px}
+.dependency-type-tabs{display:flex;gap:16px;margin-bottom:4px;font-size:13px;flex-wrap:wrap}
+.dependency-type-tabs label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.checklist label.dependency-row-disabled{color:var(--muted);cursor:not-allowed}
+.relation-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.relation-remove{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px;flex:none;line-height:1;border-radius:4px}
+.relation-remove:hover{color:var(--danger);background:var(--soft)}
+/* Task Relationship Diagram */
+.diagram-canvas{overflow:auto;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel)}
+.diagram-canvas svg text{fill:var(--ink);font-size:12px;font-family:inherit}
+.diagram-canvas svg text.mono{font-family:ui-monospace,SFMono-Regular,monospace;fill:var(--muted);font-size:11px}
+.diagram-node rect{fill:var(--soft);stroke:var(--line);stroke-width:1.5}
+.diagram-node{cursor:pointer}
+.diagram-node:hover rect{stroke:var(--accent)}
+.diagram-node.dimmed{opacity:.35}
+.diagram-node.status-done rect{fill:var(--soft);stroke:var(--accent)}
+.diagram-edge{stroke:var(--muted);stroke-width:1.5;fill:none}
+.diagram-edge.edge-blocked{stroke:var(--danger)}
+.diagram-arrowhead{fill:var(--danger)}
+.diagram-legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--muted)}
+.legend-item{display:flex;align-items:center;gap:6px}
+.legend-line{display:inline-block;width:24px;height:0;border-top:2px solid var(--muted)}
+.legend-line.edge-parent{border-top-style:dashed}
+.legend-line.edge-blocked{border-top-style:solid;border-top-color:var(--danger)}
+.legend-line.edge-relates{border-top-style:dotted}
+.diagram-limit-input{width:76px}
+.diagram-label-dot{stroke:var(--panel);stroke-width:1}
+.diagram-toggles{align-items:center;row-gap:10px}
+.diagram-mode{display:flex;align-items:center;gap:8px;margin-left:auto}
+.diagram-mode-label{font-size:13px;color:var(--muted);white-space:nowrap}
+.diagram-zoom{display:flex;gap:6px;margin-right:auto}
+.diagram-zoom button{width:32px;padding:0;font-size:16px;line-height:1}
+/* iOS-style segmented control: one bordered strip, an .active button reads as the selected segment. */
+.segmented{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.segmented button{border:0;background:transparent;color:var(--ink);padding:7px 14px;font-size:13px;cursor:pointer;border-right:1px solid var(--line)}
+.segmented button:last-child{border-right:0}
+.segmented button.active{background:#285f44;color:#fff}
+.segmented button:not(.active):hover{background:var(--soft)}
