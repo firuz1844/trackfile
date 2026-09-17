@@ -1,12 +1,12 @@
 :root{
   font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   color:#26362f;
-  background:#f6f7f4;
+  color-scheme:light;
   font-size:15px;
   --bg:#f6f7f4;
   --panel:#fff;
   --ink:#26362f;
-  --muted:#758078;
+  --muted:#67726a;
   --line:#e2e7df;
   --accent:#245d43;
   --soft:#eaf2e8;
@@ -17,7 +17,10 @@
   box-sizing:border-box
 }
 body{
-  margin:0
+  margin:0;
+  min-height:100vh;
+  background:var(--bg);
+  color:var(--ink)
 }
 body[data-theme=dark]{
   --bg:#17201b;
@@ -28,8 +31,13 @@ body[data-theme=dark]{
   --accent:#99cfaa;
   --soft:#2c4131;
   --danger:#ffa99e;
+  color-scheme:dark;
   background:var(--bg);
   color:var(--ink)
+}
+/* The theme lives on <body>; native scrollbars follow the root element, so mirror it there too. */
+html:has(body[data-theme=dark]){
+  color-scheme:dark
 }
 button,input,textarea,select{
   font:inherit
@@ -297,9 +305,10 @@ main{
   font-size:14px;
   color:var(--muted)
 }
-.breadcrumb span{
+.breadcrumb .sep{
   margin:0 12px;
-  color:var(--line)
+  color:var(--muted);
+  opacity:.55
 }
 .breadcrumb strong{
   color:var(--ink);

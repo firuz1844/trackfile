@@ -106,6 +106,8 @@ test('file API: logical names, compare-and-swap, deletion with text null, whole 
   assert.equal((await fetch(`${base}/`)).status, 200);
   assert.equal((await fetch(`${base}/index.html`)).headers.get('content-type'), 'text/html; charset=utf-8');
   assert.equal((await fetch(`${base}/assets/app.js`)).status, 200);
+  assert.equal((await fetch(`${base}/assets/favicon.svg`)).headers.get('content-type'), 'image/svg+xml');
+  assert.equal((await fetch(`${base}/assets/favicon.png`)).headers.get('content-type'), 'image/png');
   assert.equal((await fetch(`${base}/TRACKFILE.md`)).status, 404, 'repository files are not static assets');
   assert.equal((await fetch(`${base}/..%2Fsecret`)).status, 404);
   assert.equal((await fetch(`${base}/.hidden`)).status, 404);
