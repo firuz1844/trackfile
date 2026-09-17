@@ -166,10 +166,13 @@ deleted lines red where they were.
 **Commit pages.** A task's commit hash links to a page with the message (task numbers linked), author, date,
 parents, tasks that reference the commit, the file list and a unified diff per file.
 
-**Archive.** On load, closed tasks (`done`/`cancelled`/`removed`) older than seven days move from
-`TRACKFILE.md` to `.trackfile/archive.md` in one write and one commit (`#001 #002 [auto archive]: …`); a
+**Archive.** On load, closed tasks (`done`/`cancelled`/`removed`) older than a cutoff (seven days by default,
+`archive_after_days` under Settings → **Auto-archive**, project-wide via the registry's front matter) move
+from `TRACKFILE.md` to `.trackfile/archive.md` in one write and one commit (`#001 #002 [auto archive]: …`); a
 feature with open subtasks stays. **Archive** / **Unarchive** move a task by hand in either direction; a
-task returned by hand is left alone until its status changes; reopening an archived task returns it
+finished task can still have finished subtasks sitting in the registry (the dashboard never archives them on
+its own), so a manual archive with such subtasks offers to sweep the whole closed subtree in the same commit.
+A task returned by hand is left alone until its status changes; reopening an archived task returns it
 automatically. Archived tasks are hidden in the tree until **Show archive** is ticked and never count
 differently in progress. Agents never archive: they set `done`, the dashboard moves the record.
 
@@ -200,7 +203,9 @@ next_task: 43
 ```
 
 `next_task` is a monotonic counter strictly greater than every existing ID; task IDs have at least three
-digits, milestone IDs are `M` plus at least two digits; IDs are never reused. The file has a `## Milestones`
+digits, milestone IDs are `M` plus at least two digits; IDs are never reused. An optional `archive_after_days`
+(a non-negative integer) overrides the default seven-day auto-archive cutoff for the whole project; the
+dashboard writes it from Settings → **Auto-archive**. The file has a `## Milestones`
 section and a `## Tasks` section (the section names are free — the parser only uses `## ` headings as
 boundaries); each record is an exact heading followed immediately by a `yaml` fence:
 

@@ -252,6 +252,31 @@ test('archive moves closed tasks to the archive and back; auto-archive respects 
   assert.throws(() => M.parse({ ...a.files, archive: a.files.archive + '\n' + d.tasks[0].raw.replace('```yaml\n', '```yaml\narchived_at: "' + now + '"\n') }), code('duplicate_id'));
   assert.throws(() => M.addTask(a, { title: 'x', body: '', parent: done.id }, now), code('parent_archived'));
 });
+test('closedDescendants finds finished, unarchived subtasks so a manual archive can offer to sweep them in; setArchiveAfterDays edits the project-wide cutoff', () => {
+  const d = parsed();
+  // 001's children: 002 (to-do, excluded), 003 (done) and 004 (removed) — both closed and not yet archived.
+  assert.deepEqual(M.closedDescendants(d, '001').sort(), ['003', '004']);
+  assert.deepEqual(M.closedDescendants(d, '999'), [], 'no children at all');
+  // A deeper, already-archivable subtree: archiving the feature together with its closed subtasks in one call.
+  const extra = F.task('011', 'Done feature with a closed child', { kind: 'feature', status: 'done', completed_at: now }) +
+    F.task('012', 'Done child', { parent: '011', status: 'done', completed_at: now });
+  const d2 = withRegistry(source.replace('next_task: 11', 'next_task: 13') + extra);
+  assert.deepEqual(M.closedDescendants(d2, '011'), ['012']);
+  // Archiving just the feature succeeds and silently leaves its closed child behind — the gap #202 closes.
+  const parentOnly = after(d2, M.archive(d2, '011', now));
+  assert.equal(parentOnly.byId.get('011').archived, true); assert.equal(parentOnly.byId.get('012').archived, false);
+  const swept = after(d2, M.archive(d2, ['011', ...M.closedDescendants(d2, '011')], now));
+  assert.equal(swept.byId.get('011').archived, true); assert.equal(swept.byId.get('012').archived, true);
+  // archive_after_days: an optional, validated front-matter field editable through setArchiveAfterDays.
+  assert.equal(d.meta.archive_after_days, undefined, 'unset by default, ARCHIVE_AFTER_DAYS applies');
+  assert.throws(() => M.parse(source.replace('next_task: 11', 'next_task: 11\narchive_after_days: -1')), code('archive_after_days'));
+  assert.throws(() => M.parse(source.replace('next_task: 11', 'next_task: 11\narchive_after_days: "7"')), code('archive_after_days'));
+  const withDays = after(d, M.setArchiveAfterDays(d, 3));
+  assert.equal(withDays.meta.archive_after_days, 3);
+  assert.deepEqual(M.archiveCandidates(withDays, '2025-01-06T10:00:00Z', withDays.meta.archive_after_days), M.archiveCandidates(withDays, '2025-01-06T10:00:00Z', 3));
+  assert.throws(() => M.setArchiveAfterDays(d, -1), code('archive_after_days'));
+  assert.throws(() => M.setArchiveAfterDays(d, 1.5), code('archive_after_days'));
+});
 test('addToMilestone pins the task explicitly; subtasks follow only with withSubtasks, otherwise inherited ones keep their previous milestone', () => {
   const d = parsed();
   const kept = after(d, M.addToMilestone(d, '001', 'M02', {}, now));

@@ -7,6 +7,8 @@
 - A new "Relationship diagram" sidebar page: parent/child, blocking and "relates to" links as a small SVG graph, centered on a task or the whole registry, with a status filter, edge-type toggles and a node cap (dim or hide).
 - A task's own labels now show in a dedicated, wrapping "Labels" row right under its title (small pill chips, `border-radius:999px`), separate from the status/archive/blocked badges; compact rows (tree, recent changes, subtasks) keep them inline as before.
 - The task tree filters gained a labels filter and, behind a "More" toggle, record author and assignee filters, all multi-select like the existing status filter.
+- Manual archive now offers to sweep a finished task's own done/cancelled/removed subtasks into the archive along with it, instead of silently leaving them behind in the registry.
+- The auto-archive cutoff (previously a fixed week) is now a project-wide setting (`archive_after_days` in the registry's front matter), editable from a new "Auto-archive" dialog under Settings.
 - Model, i18n and layout tests for all of the above.
 
 ## 0.1.1

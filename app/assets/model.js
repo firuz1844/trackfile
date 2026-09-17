@@ -55,6 +55,7 @@
     comments_orphan: '{file}: task {id} is neither in the registry nor in the archive.',
     priority: '{id}: priority must be one of {values}.',
     next_task: 'next_task must exceed every existing ID.',
+    archive_after_days: 'archive_after_days must be a non-negative integer.',
     status: 'Unknown status for {id}.',
     kind: 'Invalid kind for {id}.',
     field_required: '{id}: field {field} is required.',
@@ -208,6 +209,7 @@
     for (const m of milestones) if (m.priority !== undefined && !priorities.includes(m.priority)) fail('priority', { id: m.id, values: priorities.join('/') });
     for (const l of labels) if (!HEX_COLOR.test(l.color)) fail('label_color', { id: l.id, color: l.color });
     if (meta.next_task <= Math.max(0, ...tasks.map(t => Number(t.id)))) fail('next_task');
+    if (meta.archive_after_days !== undefined && !(Number.isSafeInteger(meta.archive_after_days) && meta.archive_after_days >= 0)) fail('archive_after_days');
     for (const t of tasks) {
       if (!statuses.includes(t.status)) fail('status', { id: t.id });
       if (!['feature', 'task'].includes(t.kind)) fail('kind', { id: t.id });
@@ -661,6 +663,12 @@
   }
   const closedAt = t => Date.parse(t.completed_at ?? t.updated_at);
   const openDescendant = (doc, id) => doc.tasks.some(c => c.parent === id && (!closed.has(c.status) || openDescendant(doc, c.id)));
+  // #202: subtasks (at any depth) that are done/cancelled/removed but not archived yet — offered
+  // alongside a manual archive so a finished tree does not leave orphaned records behind in the registry.
+  function closedDescendants(doc, id) {
+    const children = doc.tasks.filter(c => c.parent === id);
+    return children.filter(c => !c.archived && closed.has(c.status)).map(c => c.id).concat(children.flatMap(c => closedDescendants(doc, c.id)));
+  }
   function archive(doc, ids, now = new Date().toISOString()) {
     const list = [...new Set(Array.isArray(ids) ? ids : [ids])].map(id => doc.byId.get(id) ?? fail('task_not_found', { id }));
     for (const t of list) {
@@ -685,6 +693,14 @@
   function autoArchive(doc, now = new Date().toISOString(), days = ARCHIVE_AFTER_DAYS) {
     const ids = archiveCandidates(doc, now, days);
     return { ids, changes: ids.length ? archive(doc, ids, now) : {} };
+  }
+  // #202: the auto-archive cutoff is a project-wide setting, so it lives in the registry's front
+  // matter (like next_task) rather than in one person's .trackfile/config.json.
+  function setArchiveAfterDays(doc, days) {
+    if (!Number.isSafeInteger(days) || days < 0) fail('archive_after_days');
+    const meta = { ...doc.meta, archive_after_days: days };
+    const text = `---\n${dump(meta)}\n---\n` + doc.text.slice(doc.frontLength);
+    return commit(doc, [], { [REGISTRY]: text });
   }
   const findComment = (doc, taskId, commentId) => {
     const t = doc.byId.get(taskId);
@@ -720,7 +736,7 @@
     const comments = t.comments.filter((_, i) => i !== index);
     return commit(doc, [], { [commentsFile(t.id)]: commentsText(comments) });
   }
-  const api = { statuses, priorities, priorityOf, inactive, closed, presetColors, defaultLabels, edgeTypes, REGISTRY, ARCHIVE, ARCHIVE_AFTER_DAYS, commentsFile, COMMENTS_FILE, MESSAGES, format, label, yaml, dump, parse, parseComments, commentsText, apply, archive, unarchive, archiveCandidates, autoArchive, milestoneOf, excluded, progress, complete, defaults, cleanConfig, editTask, addTask, editMilestone, addMilestone, setMilestone, addToMilestone, setParent, setDependencies, setRelationships, blockedBy, blocks, relatedTasks, isBlocked, addLabel, editLabel, deleteLabel, needsLabelSeed, seedDefaultLabels, setTaskLabels, setStatus, addComment, editComment, setCommentDone, deleteComment };
+  const api = { statuses, priorities, priorityOf, inactive, closed, presetColors, defaultLabels, edgeTypes, REGISTRY, ARCHIVE, ARCHIVE_AFTER_DAYS, commentsFile, COMMENTS_FILE, MESSAGES, format, label, yaml, dump, parse, parseComments, commentsText, apply, archive, unarchive, archiveCandidates, autoArchive, closedDescendants, setArchiveAfterDays, milestoneOf, excluded, progress, complete, defaults, cleanConfig, editTask, addTask, editMilestone, addMilestone, setMilestone, addToMilestone, setParent, setDependencies, setRelationships, blockedBy, blocks, relatedTasks, isBlocked, addLabel, editLabel, deleteLabel, needsLabelSeed, seedDefaultLabels, setTaskLabels, setStatus, addComment, editComment, setCommentDone, deleteComment };
   root.RegistryModel = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(globalThis);

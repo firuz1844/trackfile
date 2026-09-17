@@ -106,9 +106,10 @@
   }
   // When the registry loads, closed tasks older than a week move to the archive in one write and one commit.
   async function autoArchive() {
-    const ids = M.archiveCandidates(doc);
+    const days = doc.meta.archive_after_days ?? M.ARCHIVE_AFTER_DAYS;
+    const ids = M.archiveCandidates(doc, undefined, days);
     if (!ids.length) return;
-    await mutateProject(current => M.autoArchive(current).changes, t('notice.auto_archived', { n: ids.length, ids: ids.map(id => '#' + id).join(', ') }), { operation: 'auto archive', taskIds: ids, title: `auto-archive, tasks: ${ids.length}` });
+    await mutateProject(current => M.autoArchive(current, undefined, days).changes, t('notice.auto_archived', { n: ids.length, ids: ids.map(id => '#' + id).join(', ') }), { operation: 'auto archive', taskIds: ids, title: `auto-archive, tasks: ${ids.length}` });
   }
   async function reload() {
     if (!store || saving || loading) return;
@@ -456,6 +457,16 @@
   function setStatus(task, status) {
     return mutateProject(current => M.setStatus(current, task.id, status), t('notice.status_set', { id: task.id, status: labels(status) }));
   }
+  // #202: a finished task can have finished subtasks still sitting in the registry (the dashboard
+  // never archives them on its own), so a manual archive offers to sweep the whole closed subtree in one go.
+  function archiveTask(task) {
+    const subtasks = M.closedDescendants(doc, task.id);
+    const withSubtasks = subtasks.length > 0 && confirm(t('archive.with_subtasks_confirm', { n: subtasks.length }));
+    const ids = withSubtasks ? [task.id, ...subtasks] : task.id;
+    const message = withSubtasks ? t('notice.archived_with_subtasks', { id: task.id, n: subtasks.length }) : t('notice.archived', { id: task.id });
+    const change = withSubtasks ? { operation: 'archive', taskIds: ids, title: task.title } : { operation: 'archive', taskId: task.id };
+    return mutateProject(current => M.archive(current, ids), message, change);
+  }
   function copiedPopup(event) {
     document.querySelector('.copied-popup')?.remove();
     const popup = el('span', 'copied-popup', t('copy.copied'));
@@ -511,7 +522,7 @@
     list.push({ label: t('action.change_status'), submenu: () => statusItems(task) });
     // Manual move between the registry and the archive; a closed task with open subtasks stays.
     if (task.archived) list.push({ label: t('action.unarchive'), run: () => mutateProject(current => M.unarchive(current, task.id), t('notice.unarchived', { id: task.id }), { operation: 'unarchive', taskId: task.id }) });
-    else if (M.closed.has(task.status)) list.push({ label: t('action.archive'), run: () => mutateProject(current => M.archive(current, task.id), t('notice.archived', { id: task.id }), { operation: 'archive', taskId: task.id }) });
+    else if (M.closed.has(task.status)) list.push({ label: t('action.archive'), run: () => archiveTask(task) });
     list.push({ label: t('action.copy_number'), run: () => copyReference('#' + task.id), navigation: true });
     return list;
   }
@@ -1389,6 +1400,26 @@
     if ($('label-assign').open) renderLabelAssign();
     if ($('label-manage').open) renderLabelManage();
   }
+  // #202: auto-archive cutoff, a project-wide setting stored in the registry's front matter, edited from Settings.
+  function openSettingsArchive() {
+    $('settings-archive-days').value = doc.meta.archive_after_days ?? M.ARCHIVE_AFTER_DAYS;
+    $('settings-archive-error').textContent = '';
+    $('settings-archive').showModal(); $('settings-archive-days').focus();
+  }
+  function closeSettingsArchive() { $('settings-archive').close(); }
+  async function saveSettingsArchive(event) {
+    event.preventDefault(); if (saving) return;
+    const days = Number($('settings-archive-days').value);
+    if (!Number.isInteger(days) || days < 0) { $('settings-archive-error').textContent = t('error.archive_after_days'); return; }
+    // #202: a shorter cutoff can make already-closed tasks eligible right away — confirm before the
+    // next autoArchive() sweeps them in, so the user is not surprised by a batch move they did not ask for.
+    const immediate = M.archiveCandidates(doc, undefined, days).length;
+    if (immediate > 0 && !confirm(t('settings.archive_immediate_confirm', { n: immediate }))) return;
+    const ok = await mutateProject(current => M.setArchiveAfterDays(current, days), t('notice.archive_days_saved', { n: days }));
+    if (!ok) { $('settings-archive-error').textContent = t('save.failed'); return; }
+    closeSettingsArchive();
+    autoArchive();
+  }
   // Task Relationship Diagram: a filtered, capped subgraph rendered as inline SVG (diagram.js does the layout).
   function diagramScope() {
     const all = doc.tasks.filter(x => !x.archived);
@@ -1834,8 +1865,11 @@
   $('label-form-color-input').addEventListener('input', () => { $('label-form-color').value = $('label-form-color-input').value; renderLabelPalette(); });
   $('settings-gear').addEventListener('click', () => {
     const r = $('settings-gear').getBoundingClientRect();
-    showMenu([{ label: t('label.manage_heading'), run: openLabelManage }], r.right + 8, r.top, t('settings.title'));
+    showMenu([{ label: t('label.manage_heading'), run: openLabelManage }, { label: t('settings.archive_heading'), run: openSettingsArchive }], r.right + 8, r.top, t('settings.title'));
   });
+  $('settings-archive-form').addEventListener('submit', saveSettingsArchive);
+  $('close-settings-archive').addEventListener('click', closeSettingsArchive); $('cancel-settings-archive').addEventListener('click', closeSettingsArchive);
+  $('settings-archive').addEventListener('cancel', e => { e.preventDefault(); closeSettingsArchive(); });
   $('diagram-root').addEventListener('change', () => { config.diagramRoot = $('diagram-root').value || null; renderDiagramCanvas(); saveConfig(); });
   $('diagram-limit').addEventListener('change', () => { config.diagramLimit = Math.max(1, Math.min(500, Number($('diagram-limit').value) || 60)); $('diagram-limit').value = config.diagramLimit; renderDiagramCanvas(); saveConfig(); });
   $('diagram-show-names').addEventListener('change', () => { config.diagramShowNames = $('diagram-show-names').checked; renderDiagramCanvas(); saveConfig(); });
