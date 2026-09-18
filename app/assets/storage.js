@@ -29,6 +29,7 @@
     async readAll() {
       const payload = await this.fetchJson('/api/registry', {}, 'offline');
       this.layout = payload.layout;
+      this.liveAssignees = payload.liveAssignees ?? {};
       if (payload.files?.registry == null) throw Object.assign(serverError('no_registry'), { name: 'NotFoundError' });
       const files = { ...payload.files };
       if (files.archive === null) delete files.archive;
@@ -48,6 +49,11 @@
     deleteFile(taskId, name) {
       return this.fetchJson(`/api/files/${encodeURIComponent(taskId)}/${encodeURIComponent(name)}`, { method: 'DELETE' }, 'offline_delete');
     }
+    // Shared-branch mode (#210): a no-op {shared:false} in the legacy layout, so callers don't need to
+    // check `this.layout.shared` themselves before calling these.
+    gitStatus() { return this.fetchJson('/api/git/status', {}, 'offline'); }
+    gitFetch() { return this.fetchJson('/api/git/fetch', { method: 'POST' }, 'offline'); }
+    gitSync() { return this.fetchJson('/api/git/sync', { method: 'POST' }, 'offline'); }
     write(name, text, expected) {
       const operation = this.tail.catch(() => {}).then(() => this.request(name, {
         method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, expected: expected ?? null })

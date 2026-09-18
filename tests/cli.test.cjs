@@ -44,7 +44,7 @@ test('init creates the registry, archive, .gitignore and agent rules; a second r
   const registry = fs.readFileSync(path.join(root, 'TRACKFILE.md'), 'utf8');
   assert.match(registry, /^project: "Demo"$/m); assert.match(registry, /^next_task: 1$/m); assert.match(registry, /^### MILESTONE M01$/m);
   assert.match(fs.readFileSync(path.join(root, '.trackfile', 'archive.md'), 'utf8'), /^archive: true$/m);
-  assert.equal(fs.readFileSync(path.join(root, '.gitignore'), 'utf8'), 'node_modules\n.trackfile/config.json\n');
+  assert.equal(fs.readFileSync(path.join(root, '.gitignore'), 'utf8'), 'node_modules\n.trackfile/config.json\n.trackfile/.sync.lock\n.trackfile/.agent/\n');
   const agentsMd = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
   assert.ok(agentsMd.startsWith('# Existing rules\n\nKeep me.\n'), 'existing content is kept');
   assert.ok(agentsMd.includes(`<!-- trackfile:start v=${agents.VERSION} -->`) && agentsMd.trimEnd().endsWith('<!-- trackfile:end -->'));

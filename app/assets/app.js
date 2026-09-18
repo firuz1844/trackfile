@@ -3,7 +3,7 @@
   'use strict';
   const M = RegistryModel, $ = id => document.getElementById(id), { t, plural } = I18n;
   const labels = status => t('status.' + status);
-  let doc = null, store = null, baseline = null, configBaseline = null, config = M.defaults(), layout = null;
+  let doc = null, store = null, baseline = null, configBaseline = null, config = M.defaults(), layout = null, liveAssignees = {};
   let configTimer, configQueue = Promise.resolve(), configWrites = 0, pendingConfig = false, editing = null, commentEditing = null, commentTarget = null, saving = false, polling = false, loading = false;
   const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
   const button = (text, action, className = '') => { const b = el('button', className, text); b.type = 'button'; b.addEventListener('click', action); return b; };
@@ -94,7 +94,7 @@
     let state;
     try { state = rawConfig ? JSON.parse(rawConfig) : M.defaults(); } catch { throw Object.assign(new Error(), { code: 'config_corrupt' }); }
     if (state.schema !== 1) throw Object.assign(new Error(), { code: 'config_schema' });
-    store = candidate; doc = parsed; baseline = files; configBaseline = rawConfig; config = M.cleanConfig(state, doc); layout = candidate.layout;
+    store = candidate; doc = parsed; baseline = files; configBaseline = rawConfig; config = M.cleanConfig(state, doc); layout = candidate.layout; liveAssignees = candidate.liveAssignees;
     // Filters, pins and expansion are restored from config; the page itself comes from the URL hash
     // (deep link / reload) and otherwise is the dashboard.
     config.view = 'dashboard';
@@ -102,8 +102,48 @@
     pendingConfig = false; notice(t('notice.connected', { registry: layout.registry })); $('reload').disabled = false;
     initialRoute(); saveConfig();
     autoArchive();
+    updateGitStatus();
     return true;
   }
+  // Shared-branch mode (#210): the sidebar button/badge, a background fast-forward every 30s while the tab
+  // is visible, and re-checking after every write so the badge never lags a commit this tab itself made.
+  const gitSyncButton = $('git-sync'), gitSyncBadge = $('git-sync-badge');
+  let gitSyncing = false;
+  async function updateGitStatus() {
+    if (!store || !layout?.shared) { gitSyncButton.hidden = true; return; }
+    gitSyncButton.hidden = false;
+    try {
+      const { unpushed, dirty } = await store.gitStatus();
+      // `dirty` covers edits the dashboard itself just wrote (a status change, say) that have no commit of
+      // their own yet — "Synchronize" is what turns those into one, so the badge has to reflect it too, not
+      // only commits already made but not pushed.
+      gitSyncBadge.hidden = !unpushed && !dirty; gitSyncBadge.textContent = unpushed ? String(unpushed) : '•';
+      gitSyncButton.title = dirty ? t('sync.dirty_hint') : unpushed ? t('sync.unpushed_hint', { n: unpushed }) : t('sync.clean_hint');
+    } catch { /* advisory only — a failed status check never blocks the UI */ }
+  }
+  async function runGitSync() {
+    if (!store || gitSyncing) return;
+    gitSyncing = true; gitSyncButton.disabled = true;
+    try {
+      // Pull first (fetch + fast-forward if clean), then send anything queued — "Synchronize" means both
+      // directions, not just flushing this clone's own unpushed commits.
+      await store.gitFetch();
+      const result = await store.gitSync();
+      await reload();
+      if (result.pushed) notice(t('sync.done'));
+      else if (result.clean) notice(t('sync.nothing'));
+      else notice(t('sync.queued', { n: result.unpushedCount ?? 0 }));
+    } catch (error) { notice(errorText(error), true); }
+    finally { gitSyncing = false; gitSyncButton.disabled = false; updateGitStatus(); }
+  }
+  gitSyncButton.addEventListener('click', runGitSync);
+  setInterval(async () => {
+    if (!store || !layout?.shared || document.hidden || editing || saving) return;
+    try {
+      const result = await store.gitFetch();
+      if (result.updated) await reload(); else updateGitStatus();
+    } catch { /* the background poll never surfaces its own errors — the badge just won't move */ }
+  }, 30000);
   // When the registry loads, closed tasks older than a week move to the archive in one write and one commit.
   async function autoArchive() {
     const days = doc.meta.archive_after_days ?? M.ARCHIVE_AFTER_DAYS;
@@ -122,10 +162,11 @@
       const rawConfig = await store.optional('config');
       let incoming = rawConfig ? JSON.parse(rawConfig) : M.defaults();
       if (incoming.schema !== 1) throw Object.assign(new Error(), { code: 'config_schema' });
-      doc = parsed; baseline = files; configBaseline = rawConfig; layout = store.layout;
+      doc = parsed; baseline = files; configBaseline = rawConfig; layout = store.layout; liveAssignees = store.liveAssignees;
       config = M.cleanConfig(incoming, doc); pendingConfig = false;
       applyLanguage(); render(); saveConfig(); notice(t('notice.reloaded'));
       autoArchive();
+      updateGitStatus();
     } catch (error) { saveState(t('save.reload_failed')); notice(errorText(error), true); }
     finally { loading = false; $('reload').disabled = false; }
   }
@@ -452,10 +493,18 @@
       } else notice(message);
       return true;
     } catch (error) { notice(errorText(error), true); return false; }
-    finally { saving = false; }
+    finally { saving = false; updateGitStatus(); }
+  }
+  // #210: a non-blocking heads-up when a live agent is on this task — never prevents the write, just says
+  // so, since only the writer decides whether to proceed (the protocol already says agents only touch their
+  // own tasks; this is for the *user* acting on one an agent currently has).
+  function liveWarning(taskId) {
+    const live = liveAssignees[taskId];
+    if (!live) return '';
+    return ' ' + t('live.warning', { marker: live.marker, time: new Date(live.since).toLocaleTimeString(I18n.locale(), { hour: '2-digit', minute: '2-digit' }) });
   }
   function setStatus(task, status) {
-    return mutateProject(current => M.setStatus(current, task.id, status), t('notice.status_set', { id: task.id, status: labels(status) }));
+    return mutateProject(current => M.setStatus(current, task.id, status), t('notice.status_set', { id: task.id, status: labels(status) }) + liveWarning(task.id));
   }
   // #202: a finished task can have finished subtasks still sitting in the registry (the dashboard
   // never archives them on its own), so a manual archive offers to sweep the whole closed subtree in one go.
@@ -1637,7 +1686,7 @@
     const { taskId, commentId } = commentEditing, text = $('comment-body').value;
     const ok = await mutateProject(
       current => commentId ? M.editComment(current, taskId, commentId, text) : M.addComment(current, taskId, text),
-      commentId ? t('notice.comment_updated', { ref: `#${Number(taskId)}.${commentId}` }) : t('notice.comment_added', { id: Number(taskId) }),
+      (commentId ? t('notice.comment_updated', { ref: `#${Number(taskId)}.${commentId}` }) : t('notice.comment_added', { id: Number(taskId) })) + (commentId ? '' : liveWarning(taskId)),
       { operation: commentId ? 'edit comment' : 'commented', taskId }
     );
     if (ok) { commentEditing = null; $('comment-editor').close(); openTaskComment(taskId, commentId ?? doc.byId.get(taskId).comments.length); }
@@ -1891,6 +1940,7 @@
       const currentStore = store;
       const files = await currentStore.readAll();
       if (currentStore !== store || loading || editing || saving) return;
+      liveAssignees = currentStore.liveAssignees;
       if (!sameFiles(files, baseline)) {
         const parsed = M.parse(files); doc = parsed; baseline = files; config = M.cleanConfig(config, doc);
         applyLanguage(); render(); saveConfig(); notice(t('notice.external_change'));
