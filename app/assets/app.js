@@ -103,6 +103,7 @@
     initialRoute(); saveConfig();
     autoArchive();
     updateGitStatus();
+    updateMigrateBanner();
     return true;
   }
   // Shared-branch mode (#210): the sidebar button/badge, a background fast-forward every 30s while the tab
@@ -144,6 +145,45 @@
       if (result.updated) await reload(); else updateGitStatus();
     } catch { /* the background poll never surfaces its own errors — the badge just won't move */ }
   }, 30000);
+
+  // #212: the migration wizard — a dismissible nudge (not a modal, not automatic) toward shared mode for a
+  // repository still on the legacy layout, and the dialog that runs `trackfile migrate --shared` for real.
+  const migrateBanner = $('migrate-banner'), migrateWizard = $('migrate-wizard');
+  const migratePlan = $('migrate-plan'), migratePlanList = $('migrate-plan-list'), migrateRunButton = $('migrate-run'), migrateError = $('migrate-wizard-error');
+  function updateMigrateBanner() {
+    migrateBanner.hidden = !store || Boolean(layout?.shared) || Boolean(config.migrationBannerDismissed);
+  }
+  $('migrate-banner-dismiss').addEventListener('click', () => { config.migrationBannerDismissed = true; saveConfig(); updateMigrateBanner(); });
+  $('migrate-banner-open').addEventListener('click', () => {
+    $('migrate-branch').value = 'trackfile'; $('migrate-remote').value = 'origin'; $('migrate-local').checked = false; $('migrate-push').checked = false;
+    migratePlan.hidden = true; migratePlanList.replaceChildren(); migrateError.textContent = ''; migrateRunButton.disabled = true;
+    migrateWizard.showModal();
+  });
+  const closeMigrateWizard = () => migrateWizard.close();
+  $('close-migrate-wizard').addEventListener('click', closeMigrateWizard);
+  $('cancel-migrate-wizard').addEventListener('click', closeMigrateWizard);
+  migrateWizard.addEventListener('cancel', e => { e.preventDefault(); closeMigrateWizard(); });
+  const migrateOptions = () => ({ branch: $('migrate-branch').value.trim() || 'trackfile', remote: $('migrate-remote').value.trim() || 'origin', local: $('migrate-local').checked, push: $('migrate-push').checked });
+  $('migrate-preview').addEventListener('click', async () => {
+    migrateError.textContent = ''; migrateRunButton.disabled = true;
+    try {
+      const result = await store.gitMigrate({ ...migrateOptions(), dryRun: true });
+      if (result.alreadyMigrated) { migrateError.textContent = t('migrate.already'); migratePlan.hidden = true; return; }
+      migratePlanList.replaceChildren(...(result.steps ?? []).map(s => el('li', '', `${s.name}: ${s.detail}`)));
+      migratePlan.hidden = false; migrateRunButton.disabled = false;
+    } catch (error) { migrateError.textContent = errorText(error); }
+  });
+  migrateRunButton.addEventListener('click', async () => {
+    migrateError.textContent = ''; migrateRunButton.disabled = true; $('migrate-preview').disabled = true;
+    try {
+      const result = await store.gitMigrate({ ...migrateOptions(), dryRun: false });
+      if (result.alreadyMigrated) { migrateError.textContent = t('migrate.already'); return; }
+      notice(t('migrate.success'));
+      closeMigrateWizard();
+      await reload();
+    } catch (error) { migrateError.textContent = errorText(error); migrateRunButton.disabled = false; }
+    finally { $('migrate-preview').disabled = false; }
+  });
   // When the registry loads, closed tasks older than a week move to the archive in one write and one commit.
   async function autoArchive() {
     const days = doc.meta.archive_after_days ?? M.ARCHIVE_AFTER_DAYS;
@@ -167,6 +207,7 @@
       applyLanguage(); render(); saveConfig(); notice(t('notice.reloaded'));
       autoArchive();
       updateGitStatus();
+      updateMigrateBanner();
     } catch (error) { saveState(t('save.reload_failed')); notice(errorText(error), true); }
     finally { loading = false; $('reload').disabled = false; }
   }

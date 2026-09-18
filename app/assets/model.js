@@ -296,7 +296,8 @@
   const diagramFilteredModes = ['dim', 'hide'];
   const sortFields = ['id', 'created', 'updated', 'completed'];
   const defaults = () => ({ schema: 1, view: 'dashboard', expanded: [], selected: null, selectedMilestone: null, search: '', statuses: [], milestone: 'all', labels: [], authors: [], assignees: [], sort: 'updated', sortDir: 'desc', milestoneStatuses: [], milestoneLabels: [], milestoneAuthors: [], milestoneAssignees: [], milestoneSort: 'updated', milestoneSortDir: 'desc', milestoneCollapsed: [], hideArchived: false, hideDone: false, showArchive: false, pinnedTasks: [], pinnedMilestones: [], theme: 'light', sidebarCollapsed: false, lang: null,
-    diagramRoot: null, diagramLimit: 60, diagramRelationships: [], diagramStatuses: [], diagramMilestones: [], diagramFilteredMode: 'dim', diagramHideIsolated: true, diagramShowNames: false, diagramShowLabels: false, diagramZoom: 1 });
+    diagramRoot: null, diagramLimit: 60, diagramRelationships: [], diagramStatuses: [], diagramMilestones: [], diagramFilteredMode: 'dim', diagramHideIsolated: true, diagramShowNames: false, diagramShowLabels: false, diagramZoom: 1,
+    migrationBannerDismissed: false });
   const complete = p => p.total > 0 && p.done === p.total;
   function cleanConfig(value, doc) {
     const c = defaults();
@@ -345,6 +346,7 @@
     c.diagramShowNames = value.diagramShowNames === true;
     c.diagramShowLabels = value.diagramShowLabels === true;
     c.diagramZoom = typeof value.diagramZoom === 'number' && value.diagramZoom > 0 ? Math.min(2.5, Math.max(0.4, value.diagramZoom)) : c.diagramZoom;
+    c.migrationBannerDismissed = value.migrationBannerDismissed === true;
     return c;
   }
   function record(type, data, body) {

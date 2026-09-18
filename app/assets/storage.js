@@ -54,6 +54,8 @@
     gitStatus() { return this.fetchJson('/api/git/status', {}, 'offline'); }
     gitFetch() { return this.fetchJson('/api/git/fetch', { method: 'POST' }, 'offline'); }
     gitSync() { return this.fetchJson('/api/git/sync', { method: 'POST' }, 'offline'); }
+    // #212: the migration wizard — same shape as `trackfile migrate --shared`, run in-process.
+    gitMigrate(options = {}) { return this.fetchJson('/api/git/migrate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(options) }, 'offline'); }
     write(name, text, expected) {
       const operation = this.tail.catch(() => {}).then(() => this.request(name, {
         method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, expected: expected ?? null })
