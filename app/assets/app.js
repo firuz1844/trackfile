@@ -308,6 +308,15 @@
     document.title = `${project} · Trackfile`;
     $('brand-name').textContent = project; $('crumb-project').textContent = project;
     $('lang').lastElementChild.textContent = t('lang.switch');
+    updateWorkspaceNote();
+  }
+  // #212 follow-up: once migrated, the sidebar footer should say so — "Local workspace" on its own would
+  // read as though nothing was ever pushed anywhere, which stops being true the moment shared mode is on.
+  // Needs `t()` with params (branch/remote), so it's not one of I18n.apply's plain data-i18n nodes.
+  function updateWorkspaceNote() {
+    const note = $('workspace-mode');
+    if (layout?.shared) { note.textContent = t('sidebar.shared', { branch: layout.dataBranch }); note.title = t('sidebar.shared_hint', { branch: layout.dataBranch, remote: layout.dataRemote }); }
+    else { note.textContent = t('sidebar.local'); note.title = t('sidebar.local_hint'); }
   }
   function render() {
     closeMenu();
