@@ -42,6 +42,7 @@ migrate:
   --branch NAME     data branch name (default: trackfile)
   --remote NAME     remote to push the data branch to (default: origin)
   --local           do not push the data branch — single-clone setups only
+  --push            install the trackfile-check CI workflow and (via gh, best-effort) branch protection
   --task ID         prefix the migration commits with #ID, like any other trackfile edit
   --dry-run         print the plan, write nothing
   --rollback        undo a migration: restore data files, drop the pointer and worktree

@@ -101,6 +101,27 @@ test('migrate --shared --local: does not push, the branch stays out of the remot
   assert.ok(git(root, ['branch', '--list', 'trackfile']).trim(), 'the branch exists locally');
 });
 
+test('migrate --shared --push installs the CI workflow on the data branch (gh branch-protection step degrades gracefully outside GitHub)', async () => {
+  const root = seedRepo();
+  const origin = withBareRemote(root);
+  const lines = [];
+  await migrate.run({ cwd: root, push: true, port: 47213, log: l => lines.push(l) });
+  const workflow = git(origin, ['show', 'trackfile:.github/workflows/trackfile-check.yml']);
+  assert.match(workflow, /on:\n  push:\n    branches: \[trackfile\]/);
+  assert.match(workflow, /npx --yes trackfile@latest check/);
+  assert.ok(lines.some(l => l.includes('pushed .github/workflows/trackfile-check.yml')));
+  // Not a real GitHub repo here, so branch protection can't actually be set — it must say so, not throw.
+  assert.ok(lines.some(l => l.includes('set up branch protection yourself') || l.includes('gh CLI not found')));
+});
+
+test('migrate --shared --local --push does not attempt CI setup (nothing was pushed to set it up against)', async () => {
+  const root = seedRepo();
+  withBareRemote(root);
+  const lines = [];
+  await migrate.run({ cwd: root, local: true, push: true, port: 47214, log: l => lines.push(l) });
+  assert.ok(!lines.some(l => l.includes('workflow')));
+});
+
 test('migrate --shared refuses a dirty data tree, a broken registry, and a pre-existing unrelated branch', async () => {
   const dirty = seedRepo();
   fs.appendFileSync(path.join(dirty, 'TRACKFILE.md'), '\nedited\n');

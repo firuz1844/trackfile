@@ -47,7 +47,7 @@ test('file API: logical names, compare-and-swap, deletion with text null, whole 
   assert.equal(await fs.readFile(path.join(root, '.trackfile', 'archive.md'), 'utf8'), 'arch');
   const registry = await fetch(`${base}/api/registry`).then(r => r.json());
   assert.deepEqual(registry.files, { registry: 'v2', archive: 'arch', 'comments/176': 'c2' });
-  assert.deepEqual(registry.layout, { registry: 'TRACKFILE.md', archive: '.trackfile/archive.md', tasks: '.trackfile/tasks', config: '.trackfile/config.json', attachmentsPrefix: '.trackfile/tasks', shared: false });
+  assert.deepEqual(registry.layout, { registry: 'TRACKFILE.md', archive: '.trackfile/archive.md', tasks: '.trackfile/tasks', config: '.trackfile/config.json', attachmentsPrefix: '.trackfile/tasks', shared: false, dataBranch: null });
   assert.equal((await fetch(`${base}/api/registry`, { method: 'PUT' })).status, 405);
   assert.equal((await api('registry', { method: 'PUT', body: 'not json' }))[0], 400);
   assert.equal((await fs.readdir(root)).filter(f => f.endsWith('.tmp')).length, 0, 'no temp files left behind');

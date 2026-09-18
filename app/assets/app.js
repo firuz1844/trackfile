@@ -885,8 +885,14 @@
     const attachment = new RegExp('^' + escapeRe(layout.tasks) + '/(\\d{3,})/([^/]+)$').exec(resolved);
     if (attachment) { const url = attachmentHref(attachment[1], attachment[2]); if (isImage(attachment[2])) openLightbox(url, attachment[2]); else window.open(url, '_blank', 'noopener'); return; }
     // A `…/TRACKFILE.md#task-NNN` mark is a link to a registry record, not to a file: open the task or
-    // milestone page of the dashboard (its own route); Back returns to the document.
-    if (resolved === layout.registry) {
+    // milestone page of the dashboard (its own route); Back returns to the document. In shared mode (#211)
+    // the same mark may instead point at the data worktree locally (`.trackfile/TRACKFILE.md#task-NNN`) or
+    // at the data branch's GitHub blob view (`blob/<branch>/TRACKFILE.md#task-NNN`, for a reader without
+    // the dashboard) — the reader recognizes both alongside the plain legacy path.
+    const isRegistryLink = resolved === layout.registry
+      || (layout.shared && resolved === `${layout.tasks.split('/')[0]}/${layout.registry}`)
+      || (layout.shared && resolved === `blob/${layout.dataBranch}/${layout.registry}`);
+    if (isRegistryLink) {
       let m;
       if ((m = /^task-(\d+)$/.exec(anchor)) && doc.byId.has(m[1])) return openTaskPage(m[1]);
       if ((m = /^milestone-(M\d+)$/.exec(anchor)) && doc.byMilestone.has(m[1])) return openMilestone(m[1]);

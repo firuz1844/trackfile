@@ -66,6 +66,20 @@ are held to. It is the single source for every installed variant.
 trackfile [serve] [--open] [--port N] [--registry FILE]   start the dashboard (default command)
 trackfile init [--name NAME] [--agents LIST] [--global] [--force] [--dry-run] [--launch]
 trackfile toc [--closed] [--all] [--registry FILE]         table of contents for agents
+trackfile check [--registry FILE]                          validate registry/archive invariants
+```
+
+The commands below only apply once a project has moved its data to a [shared branch](#shared-data-branch-multi-agent-multi-clone):
+
+```
+trackfile migrate --shared [--branch NAME] [--remote NAME] [--local] [--push] [--dry-run]
+trackfile migrate --rollback [--dry-run]
+trackfile new TITLE [--parent ID] [--milestone ID] [--body TEXT] [--marker NAME]
+trackfile take ID [--marker NAME]
+trackfile set ID FIELD VALUE [--marker NAME] [--acknowledge]
+trackfile comment ID TEXT [--marker NAME] [--acknowledge]
+trackfile sync [--marker NAME]
+trackfile status [--marker NAME]
 ```
 
 `serve` and `toc` look for `TRACKFILE.md` upwards from the current directory (like Git looks for `.git`), so
@@ -90,6 +104,63 @@ TRACKFILE.md               # the registry: milestones, next_task, open and recen
 The paths are parameters with these defaults. A project may override the three secondary paths in the
 registry's front matter (`archive_file`, `tasks_dir`, `config_file`, relative to the repository root) and the
 registry itself with `--registry`; relative links in task text are resolved relative to the registry file.
+
+## Shared data branch (multi-agent, multi-clone)
+
+By default the registry lives in your working branch, next to the code — fine for one clone at a time. Once
+several agents and machines are pushing tasks concurrently, the working branch stops being a good place for
+it: every task, comment and status change would be its own commit competing with real code changes on
+whatever branch happens to be checked out. **Shared mode** moves the registry to its own `trackfile` branch
+instead, checked out as a [git worktree](https://git-scm.com/docs/git-worktree) at `.trackfile/` — a second,
+lightweight working directory backed by the same clone, so nothing about your own branch or working tree
+changes.
+
+```
+trackfile migrate --shared
+```
+
+does the move: it tags the pre-migration commit (`trackfile-pre-migration`) and copies the data files to a
+sibling backup folder first, imports them into an orphan commit on the `trackfile` branch, verifies the
+import byte-for-byte, pushes it, and only then removes the files from your working branch and sets up the
+worktree. `--dry-run` prints the plan without writing anything; `--local` skips the push for a single-clone
+setup; `--push` also installs a GitHub Actions workflow that runs `trackfile check` on every push to the
+data branch and (via the `gh` CLI, if it's installed and authenticated) turns on branch protection requiring
+it. Run `trackfile migrate --rollback` to undo it — the files come back from the data branch, and the
+`trackfile` branch and the backup tag are left in place either way, for you to remove once you're sure.
+
+**How a write becomes a commit.** Every agent command (`new`, `take`, `set`, `comment`) and the dashboard's
+own writes are one transaction: take a local lock (`.trackfile/.sync.lock`, coordinating every agent and
+dashboard instance on the machine), fetch, fast-forward the worktree onto the current tip, apply the change,
+commit, and `push --force-with-lease`. A push that loses a race is retried — fetch again, reapply the change
+against the new content (so e.g. a task number is reallocated against the actually-current `next_task`,
+never a stale one), and push again, a few times with backoff before giving up. `trackfile new` specifically
+refuses outright when the remote can't be reached, rather than create a task number only you can see.
+
+**Files you'll see:** `.trackfile.json` at the repository root (the pointer — `{"branch", "remote", "mode":
+"shared"}` — commit this) marks a project as migrated; `.trackfile/` is now the worktree checkout of the
+`trackfile` branch (git-ignored from your working branch's point of view, since it's not part of it) holding
+the same `TRACKFILE.md`/`archive.md`/`tasks/` layout as before, plus `.trackfile/.sync.lock` and
+`.trackfile/.agent/<marker>.json` (per-agent local state — both git-ignored, local to the machine).
+
+**If the remote is unreachable**, a write still commits locally and reports how many commits are queued
+(`trackfile status`, or the dashboard's sync badge); the *next* transaction by anyone — not necessarily the
+same agent or machine — flushes it automatically. `trackfile sync` is the explicit way to send (and pull)
+right away: it also handles edits made by hand in the worktree, which a transaction (built around replaying
+a well-defined change, not an arbitrary diff) won't touch — a rejected push there falls back to an actual
+`git merge`, using the structural merge driver `trackfile migrate` registers on `TRACKFILE.md`/`archive.md`
+(record-by-record; a genuinely conflicting field, like two different `status` transitions, is reported
+rather than guessed at).
+
+**Without access to the remote**, an agent can still read the registry and edit existing tasks (`set`,
+`comment`) — those queue locally like any other write — but `trackfile new` refuses, since there would be no
+way to guarantee the allocated number is actually unique once connectivity comes back.
+
+Cross-references from code comments or docs into the registry (`[#NNN](TRACKFILE.md#task-NNN)`, see below)
+need a path that still resolves once the registry has moved off the working branch: use
+`.trackfile/TRACKFILE.md#task-NNN` for a relative link meant to be read locally (through the dashboard or a
+plain file viewer with the worktree present), or `blob/trackfile/TRACKFILE.md#task-NNN` for a link meant to
+be read on GitHub's own web UI (which has no worktree — this resolves against the `trackfile` branch's own
+blob view). The dashboard's reader recognizes both, alongside the plain legacy path.
 
 ## Agents and the registry
 
