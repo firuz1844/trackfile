@@ -38,13 +38,13 @@ test('init creates the registry, archive, .gitignore and agent rules; a second r
   fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Existing rules\n\nKeep me.\n');
   const dry = init.run({ cwd: root, agents: ['claude', 'codex', 'cursor'], dryRun: true, ...quiet });
   assert.equal(dry.changed, 0); assert.ok(!fs.existsSync(path.join(root, 'TRACKFILE.md')), '--dry-run writes nothing');
-  assert.deepEqual(dry.steps.map(s => [s.action, s.path]), [['create', 'TRACKFILE.md'], ['create', '.trackfile/archive.md'], ['append', '.gitignore'], ['create', '.claude/skills/trackfile/SKILL.md'], ['create', 'CLAUDE.md'], ['append', 'AGENTS.md'], ['create', '.cursor/rules/trackfile.mdc'], ['create', '.claude/launch.json']]);
+  assert.deepEqual(dry.steps.map(s => [s.action, s.path]), [['create', 'TRACKFILE.md'], ['create', '.trackfile/archive.md'], ['append', '.gitignore'], ['create', '.claude/skills/trackfile/SKILL.md'], ['create', 'CLAUDE.md'], ['append', 'AGENTS.md'], ['create', '.cursor/rules/trackfile.mdc'], ['create', '.claude/launch.json'], ['create', '.claude/settings.json']]);
   const first = init.run({ cwd: root, name: 'Demo', agents: ['claude', 'codex', 'cursor'], ...quiet });
-  assert.equal(first.changed, 8);
+  assert.equal(first.changed, 9);
   const registry = fs.readFileSync(path.join(root, 'TRACKFILE.md'), 'utf8');
   assert.match(registry, /^project: "Demo"$/m); assert.match(registry, /^next_task: 1$/m); assert.match(registry, /^### MILESTONE M01$/m);
   assert.match(fs.readFileSync(path.join(root, '.trackfile', 'archive.md'), 'utf8'), /^archive: true$/m);
-  assert.equal(fs.readFileSync(path.join(root, '.gitignore'), 'utf8'), 'node_modules\n.trackfile/config.json\n');
+  assert.equal(fs.readFileSync(path.join(root, '.gitignore'), 'utf8'), 'node_modules\n.trackfile/config.json\n.trackfile/.sync.lock\n.trackfile/.agent/\n');
   const agentsMd = fs.readFileSync(path.join(root, 'AGENTS.md'), 'utf8');
   assert.ok(agentsMd.startsWith('# Existing rules\n\nKeep me.\n'), 'existing content is kept');
   assert.ok(agentsMd.includes(`<!-- trackfile:start v=${agents.VERSION} -->`) && agentsMd.trimEnd().endsWith('<!-- trackfile:end -->'));
@@ -54,6 +54,8 @@ test('init creates the registry, archive, .gitignore and agent rules; a second r
   assert.ok(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8').includes('.claude/skills/trackfile/SKILL.md'), 'CLAUDE.md points to the skill');
   assert.match(fs.readFileSync(path.join(root, '.cursor', 'rules', 'trackfile.mdc'), 'utf8'), /^alwaysApply: true$/m);
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.claude', 'launch.json'), 'utf8')).configurations[0].name, 'trackfile');
+  const settings = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(settings.hooks.PreToolUse[0].hooks[0].command, 'npx trackfile hook-precommit');
   // Second run: everything is reported as skipped and nothing is rewritten.
   const before = Object.fromEntries(['TRACKFILE.md', '.gitignore', 'AGENTS.md', 'CLAUDE.md'].map(f => [f, fs.readFileSync(path.join(root, f), 'utf8')]));
   const second = init.run({ cwd: root, agents: ['claude', 'codex', 'cursor'], ...quiet });

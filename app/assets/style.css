@@ -279,6 +279,55 @@ small,.hint{
   border-radius:100%;
   margin-right:5px
 }
+/* #212: a dismissible nudge toward shared mode, not a callout that demands attention — small, quiet, easy
+ * to close for good. */
+.migrate-banner{
+  margin:10px 0 4px;
+  padding:10px;
+  border-radius:10px;
+  background:var(--soft);
+  font-size:12px;
+  line-height:1.4;
+  color:var(--ink)
+}
+.migrate-banner p{
+  margin:0 0 6px
+}
+.migrate-banner-actions{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px
+}
+.migrate-banner-actions button{
+  border:none;
+  background:transparent;
+  color:var(--accent);
+  font-weight:600;
+  cursor:pointer;
+  padding:2px 0
+}
+#migrate-banner-dismiss{
+  color:var(--muted);
+  font-weight:400;
+  font-size:16px;
+  line-height:1
+}
+.migrate-plan{
+  background:var(--soft);
+  border-radius:8px;
+  padding:8px 12px;
+  margin:4px 0 10px
+}
+.migrate-plan ul{
+  margin:4px 0 0;
+  padding-left:18px;
+  font-size:12.5px
+}
+.migrate-plan li{
+  margin:3px 0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace
+}
 .side-bottom{
   margin-top:auto;
   display:flex;
@@ -1569,6 +1618,7 @@ body[data-theme=dark]{
 .milestone-tree .empty{padding:18px 6px;color:var(--muted)}
 .checklist label.picked{background:var(--soft)}
 #milestone-add label.toggle{flex-direction:row;align-items:center;gap:8px;margin-bottom:10px}
+#migrate-wizard label.toggle{flex-direction:row;align-items:center;gap:8px;margin-bottom:10px}
 
 /* Commit page: header, file list and unified diff in the GitHub/Fork style. Colours via tokens for both themes. */
 :root{--diff-add-bg:#e6f4e8;--diff-add-line:#cdebd2;--diff-del-bg:#fbe9e7;--diff-del-line:#f6cfcb;--diff-hunk-bg:#eef3f8;--diff-hunk-ink:#4c6280;--diff-add-ink:#1a7f37;--diff-del-ink:#b42318}
