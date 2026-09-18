@@ -140,6 +140,29 @@ async function main() {
     } catch (error) { console.error(error.message); process.exit(1); }
     return;
   }
+  if (command === 'hook-precommit') {
+    // Claude Code PreToolUse hook (#209, installed by `init`): reads the tool-call JSON from stdin, and for
+    // a `git commit` Bash call, warns — non-blocking, stdout only — when the agent's own taken task
+    // (`.trackfile/.agent/<marker>.json`) has drifted since `take`. Silent and always exit 0 for anything
+    // else: an unreadable input, a non-git-commit command, a repository not using trackfile at all, or one
+    // still in the legacy layout (no shared-mode agent state to check).
+    let input = '';
+    process.stdin.on('data', c => { input += c; });
+    process.stdin.on('end', () => {
+      try {
+        const event = JSON.parse(input);
+        if (!/\bgit\s+([^&|;]*\s)?commit\b/.test(event?.tool_input?.command || '')) return;
+        const root = findRoot(process.cwd(), DEFAULTS.registry);
+        if (!root) return;
+        const layout = resolveLayout(root);
+        if (!layout.shared) return;
+        const commands = require('../lib/commands.cjs');
+        const drifts = commands.precommitCheck(layout);
+        for (const d of drifts) console.log(`trackfile: #${d.taskId} (taken by ${d.marker}) changed since take:\n${d.changes.map(c => `  - ${c}`).join('\n')}`);
+      } catch { /* advisory only — never block or fail a commit over this */ }
+    });
+    return;
+  }
   if (command === 'check') {
     const { check } = require('../lib/check.cjs');
     const result = check(layoutFor(opts));
