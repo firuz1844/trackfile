@@ -25,6 +25,8 @@ npx trackfile --open                       # dashboard on http://127.0.0.1:3737/
 
 Requirements: Node.js ≥ 18, Git. Chrome/Edge/Safari/Firefox for the dashboard.
 
+![Dashboard: milestone progress by priority](docs/screenshots/dashboard-milestones.png)
+
 ## Getting started
 
 ```sh
@@ -190,6 +192,8 @@ tree), task pages (description, result, sources, dependencies, labels, subtasks,
 reader and commit pages. Every page-level move is a browser history entry with a deep link: `#tree`,
 `#diagram`, `#task/042`, `#task/042/comment/3`, `#milestone/M02`, `#source/docs/design.md`, `#commit/<hash>`.
 
+![Task tree filtered to in-progress and in-review tasks](docs/screenshots/task-tree-filtered.png)
+
 **Dependencies and labels.** A task's context menu offers **Relationships** (a search filter, a Blocked
 by/Blocking/Relates to switch, and a checklist of every other task, staged and applied on Save; "Blocked by" —
 a Finish-Start blocking link with a warning chip on any task waiting on an open blocker; "Blocking" — its
@@ -208,6 +212,8 @@ title/description/parent. The
 parent/child, blocking and "relates to" links as a small graph (dashed/solid/dotted lines, a legend, click a
 node to open it), centered on the whole registry or one task, with a status filter, an edge-type toggle and a
 node cap (dim or hide whatever the filters exclude) so a large registry stays readable.
+
+![Relationship diagram: blocking and related links across seven tasks](docs/screenshots/relationship-diagram.png)
 
 Tasks are created with **New task** / **Subtask** (an existing task can be made a subtask too); title,
 description, parent and milestone are editable only while the task is `to-do` with no assignee — everything
