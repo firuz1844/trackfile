@@ -1,6 +1,6 @@
 {
   "name": "trackfile",
-  "version": "0.2.2",
+  "version": "1.0.0",
   "description": "Git-native task tracker for humans and coding agents. Tasks live in Markdown next to your code; every edit is a commit.",
   "keywords": [
     "task-tracker",

@@ -11,6 +11,17 @@
 - The auto-archive cutoff (previously a fixed week) is now a project-wide setting (`archive_after_days` in the registry's front matter), editable from a new "Auto-archive" dialog under Settings.
 - Model, i18n and layout tests for all of the above.
 
+## [1.0.0](https://github.com/firuz1844/trackfile/compare/trackfile-v0.2.2...trackfile-v1.0.0) (2026-09-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* Shared data branch: layout, migrate, sync engine, merge driver, agent CLI, dashboard ([#6](https://github.com/firuz1844/trackfile/issues/6))
+
+### Features
+
+* Shared data branch: layout, migrate, sync engine, merge driver, agent CLI, dashboard ([#6](https://github.com/firuz1844/trackfile/issues/6)) ([d5ead3d](https://github.com/firuz1844/trackfile/commit/d5ead3d635ef9a1650fb49078bce1e32c8ffa1fd))
+
 ## [0.2.2](https://github.com/firuz1844/trackfile/compare/trackfile-v0.2.1...trackfile-v0.2.2) (2026-09-17)
 
 
