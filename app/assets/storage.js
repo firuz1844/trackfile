@@ -41,6 +41,16 @@
     recordChange(operation, taskIds, title, files = ['registry']) {
       return this.fetchJson('/api/git/commit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operation, taskIds: [].concat(taskIds), title, files }) }, 'offline_commit');
     }
+    // Default commit for dashboard mutations without a more specific operation (status, labels,
+    // relationships, milestones, settings). Compare semantic records, not offsets in the text.
+    recordMutation(before, changes) {
+      const M = root.RegistryModel, previous = M.parse(before), next = M.apply(previous, changes);
+      const snapshot = task => task ? JSON.stringify({ data: task.data, body: task.body, comments: task.comments }) : null;
+      const ids = [...new Set([...previous.byId.keys(), ...next.byId.keys()])].filter(id => snapshot(previous.byId.get(id)) !== snapshot(next.byId.get(id)));
+      const taskCommit = ids.length > 0 && ids.length <= 200;
+      const title = (taskCommit ? (next.byId.get(ids[0]) || previous.byId.get(ids[0])).title : ids.length ? `Update ${ids.length} tasks` : 'Update project metadata').replace(/[\r\n\0]+/g, ' ').slice(0, 240);
+      return this.recordChange(taskCommit ? 'edit task' : 'edit project', taskCommit ? ids : [], title, Object.keys(changes));
+    }
     // Attachments: the PUT body is the raw file; the server resolves name clashes, commits and returns the final name.
     async listFiles(taskId) { return (await this.fetchJson(`/api/files/${encodeURIComponent(taskId)}`, {}, 'offline_list')).files; }
     uploadFile(taskId, file, name) {

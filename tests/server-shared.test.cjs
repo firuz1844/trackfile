@@ -120,8 +120,8 @@ test('shared: /api/git/fetch fast-forwards a clean worktree after a second clone
 });
 
 test('shared: a CAS-only write (no /api/git/commit call) is dirty in /api/git/status and flushed by /api/git/sync', async t => {
-  // Some dashboard mutations write through PUT /api/file only, with no matching /api/git/commit — a plain
-  // status change, for instance. That is exactly the case /api/git/sync exists to pick up: the badge must
+  // A low-level API client can write through PUT /api/file without a matching /api/git/commit.
+  // That is exactly the case /api/git/sync exists to pick up: the badge must
   // reflect it as unsynced work even though there is no unpushed *commit* yet, and Synchronize must commit
   // and push it like any other pending change.
   const { layout, origin } = await sharedRepo();
@@ -149,4 +149,35 @@ test('legacy mode: the new git/status/fetch/sync endpoints report shared:false a
   assert.deepEqual((await api(base, '/api/git/status'))[1], { shared: false, unpushed: 0, dirty: false });
   assert.deepEqual((await api(base, '/api/git/fetch', { method: 'POST' }))[1], { shared: false });
   assert.deepEqual((await api(base, '/api/git/sync', { method: 'POST' }))[1], { shared: false });
+});
+
+test('dashboard default mutations commit and push status, labels, relationships and project metadata', async t => {
+  const Store = require('../app/assets/storage.js');
+  const commands = require('../lib/commands.cjs');
+  const { layout, origin } = await sharedRepo();
+  const base = await start(t, layout), store = new Store(base);
+  const mutations = [
+    doc => M.setStatus(doc, '001', 'in_progress'),
+    doc => M.setTaskLabels(doc, '001', ['L01']),
+    doc => M.setRelationships(doc, '001', { blockedBy: ['007'] }),
+    doc => M.setArchiveAfterDays(doc, 30),
+    doc => M.addMilestone(doc, { title: 'New milestone', body: 'Goal' }).changes,
+  ];
+  for (const mutate of mutations) {
+    const before = await store.readAll(), changes = mutate(M.parse(before));
+    const head = git(layout.dataRoot, ['rev-parse', 'HEAD']).trim();
+    for (const [name, text] of Object.entries(changes)) await store.write(name, text, before[name] ?? null);
+    const result = await store.recordMutation(before, changes);
+    assert.equal(result.pushed, true);
+    assert.notEqual(result.hash, head);
+    assert.equal(git(layout.dataRoot, ['status', '--porcelain']).trim(), '');
+    assert.equal(git(origin, ['rev-parse', 'trackfile']).trim(), result.hash);
+  }
+  const doc = M.parse({ registry: git(origin, ['show', 'trackfile:TRACKFILE.md']) });
+  assert.equal(doc.byId.get('001').status, 'in_progress');
+  assert.deepEqual(doc.byId.get('001').labels, ['L01']);
+  assert.deepEqual(doc.byId.get('001').blocked_by, ['007']);
+  assert.equal(doc.meta.archive_after_days, 30);
+  assert.ok(doc.milestones.some(m => m.title === 'New milestone'));
+  assert.equal((await commands.setField(layout, '002', 'status', 'review', { marker: 'alice' })).pushed, true, 'UI actions must not leave a dirty tree blocking the CLI');
 });

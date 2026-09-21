@@ -115,9 +115,8 @@
     gitSyncButton.hidden = false;
     try {
       const { unpushed, dirty } = await store.gitStatus();
-      // `dirty` covers edits the dashboard itself just wrote (a status change, say) that have no commit of
-      // their own yet — "Synchronize" is what turns those into one, so the badge has to reflect it too, not
-      // only commits already made but not pushed.
+      // `dirty` also covers manual edits and writes whose commit failed. Synchronize can commit
+      // those changes, so the badge reflects them as well as commits awaiting a push.
       gitSyncBadge.hidden = !unpushed && !dirty; gitSyncBadge.textContent = unpushed ? String(unpushed) : '•';
       gitSyncButton.title = dirty ? t('sync.dirty_hint') : unpushed ? t('sync.unpushed_hint', { n: unpushed }) : t('sync.clean_hint');
     } catch { /* advisory only — a failed status check never blocks the UI */ }
@@ -534,10 +533,12 @@
       doc = M.apply(current, changes); config = M.cleanConfig(config, doc);
       render(); saveConfig();
       // Records and comments created or edited through the UI get their own Git commit.
-      if (change && Object.keys(changes).length) {
+      if (Object.keys(changes).length) {
         try {
-          const ids = changedIds(change);
-          const committed = await store.recordChange(change.operation, ids, change.title ?? doc.byId.get(ids[0]).title, Object.keys(changes));
+          const ids = change ? changedIds(change) : [];
+          const committed = change
+            ? await store.recordChange(change.operation, ids, change.title ?? doc.byId.get(ids[0]).title, Object.keys(changes))
+            : await store.recordMutation(files, changes);
           notice(`${message} ${t('notice.committed', { hash: committed.hash.slice(0, 10) })}`);
         } catch (error) { notice(`${message} ${errorText(error)}`, true); }
       } else notice(message);
@@ -1795,7 +1796,12 @@
       if (release.length) step(M.setMilestone(current, release, null));
       await writeChanges(changes, files);
       baseline = current.files; doc = current; config = M.cleanConfig(config, doc); editing = null; $('milestone-editor').close();
-      render(); saveConfig(); notice(t('notice.milestone_saved', { id }));
+      render(); saveConfig();
+      const message = t('notice.milestone_saved', { id });
+      try {
+        if (Object.keys(changes).length) await store.recordMutation(files, changes);
+        notice(message);
+      } catch (error) { notice(`${message} ${errorText(error)}`, true); }
     } catch (error) { $('milestone-error').textContent = errorText(error); }
     finally { saving = false; $('save-milestone').disabled = false; }
   }

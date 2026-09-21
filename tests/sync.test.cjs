@@ -150,3 +150,16 @@ test('a stale lock is cleared and logged; a fresh lock blocks a concurrent attem
   );
   fs.rmSync(file, { force: true });
 });
+
+test('invalid commit metadata fails before writing any registry changes', async () => {
+  const origin = await seedShared();
+  const layout = await sharedClone(origin, 'trackfile-sync-invalid-message-');
+  const before = fs.readFileSync(path.join(layout.dataRoot, 'TRACKFILE.md'), 'utf8');
+  const head = git(layout.dataRoot, ['rev-parse', 'HEAD']);
+  await assert.rejects(transact(layout, {
+    change: addTaskChange('Must not be written'), message: 'invalid\nsubject', marker: 'alice',
+  }), /must be a single line/);
+  assert.equal(fs.readFileSync(path.join(layout.dataRoot, 'TRACKFILE.md'), 'utf8'), before);
+  assert.equal(git(layout.dataRoot, ['rev-parse', 'HEAD']), head);
+  assert.equal(git(layout.dataRoot, ['status', '--porcelain']).trim(), '');
+});
