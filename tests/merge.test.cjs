@@ -117,3 +117,49 @@ test('a plain two-branch git merge with the merge driver produces a conflict-fre
   assert.ok(doc.tasks.some(t => t.title === 'Theirs new'));
   assert.equal(git(['status', '--porcelain']).trim(), '', 'the merge produced a clean commit, no leftover conflict markers');
 });
+
+test('archiving on either side and editing another task preserves one copy across registry and archive', () => {
+  const F = require('./fixture.cjs');
+  const initial = M.parse(F.files());
+  const base = M.apply(initial, M.archive(initial, ['003']));
+  const archived = M.apply(base, M.archive(base, ['008']));
+  const edited = M.apply(base, M.editTask(base, '001', 'Renamed feature', base.byId.get('001').body));
+  for (const [ours, theirs] of [[archived, edited], [edited, archived]]) {
+    const files = { ...base.files };
+    for (const name of ['registry', 'archive']) {
+      files[name] = mergeRegistryText(base.files[name], ours.files[name], theirs.files[name], { renumberTasks: name === 'registry' }).text;
+    }
+    const doc = M.parse(files);
+    assert.equal(doc.tasks.filter(task => task.id === '008').length, 1);
+    assert.equal(doc.byId.get('008').archived, true);
+    assert.equal(doc.byId.get('001').title, 'Renamed feature');
+  }
+});
+
+test('deleting a record concurrently edited on the other side reports a conflict in both directions', () => {
+  const base = registry({ tasks: [{ id: '001', title: 'Original' }] });
+  const deleted = registry();
+  const edited = base.replace('Original', 'Edited');
+  for (const [ours, theirs] of [[deleted, edited], [edited, deleted]]) {
+    assert.throws(() => mergeRegistryText(base, ours, theirs), error => error instanceof MergeConflictError && error.conflicts[0].field === 'record');
+  }
+});
+
+test('description edits survive a later independent title edit in both merge directions', () => {
+  const base = registry({ tasks: [{ id: '001', title: 'Original' }] }) + 'Original description.\n';
+  const description = base.replace('Original description.', 'Edited description.').replaceAll(now, '2026-01-02T00:00:00+00:00');
+  const title = base.replace('title: "Original"', 'title: "Renamed"').replaceAll(now, '2026-01-03T00:00:00+00:00');
+  for (const [ours, theirs] of [[description, title], [title, description]]) {
+    const doc = M.parse({ registry: mergeRegistryText(base, ours, theirs).text });
+    assert.equal(doc.byId.get('001').title, 'Renamed');
+    assert.equal(doc.byId.get('001').body, 'Edited description.');
+  }
+});
+
+test('different concurrent description edits conflict, identical ones merge', () => {
+  const base = registry({ tasks: [{ id: '001', title: 'Task' }] }) + 'Original description.\n';
+  const ours = base.replace('Original description.', 'Our description.');
+  const theirs = base.replace('Original description.', 'Their description.');
+  assert.throws(() => mergeRegistryText(base, ours, theirs), error => error instanceof MergeConflictError && error.conflicts[0].field === 'body');
+  assert.equal(M.parse({ registry: mergeRegistryText(base, ours, ours).text }).byId.get('001').body, 'Our description.');
+});

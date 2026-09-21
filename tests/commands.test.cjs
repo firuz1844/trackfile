@@ -115,3 +115,80 @@ test('sync commits and pushes a hand-edit; status reports unpushed commits and d
   const doc = M.parse({ registry: git(origin, ['show', 'trackfile:TRACKFILE.md']) });
   assert.equal(doc.byId.get('002').result, 'partial progress', 'the queued commit reached the remote via sync');
 });
+
+test('sync pulls a remote-only change into a clean worktree even with a stale tracking ref', async () => {
+  const { layout, origin } = await sharedRepo();
+  const other = tmp('trackfile-cmd-pull-');
+  git(other, ['clone', '-q', '--branch', 'trackfile', origin, '.']);
+  const file = path.join(other, 'TRACKFILE.md');
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('Feature one', 'Changed remotely'));
+  git(other, ['add', '-A']);
+  git(other, ['-c', 'user.email=b@b.com', '-c', 'user.name=B', 'commit', '-qm', 'remote edit']);
+  git(other, ['push', '-q', 'origin', 'trackfile']);
+  const remoteHead = git(other, ['rev-parse', 'HEAD']).trim();
+  assert.notEqual(git(layout.dataRoot, ['rev-parse', 'origin/trackfile']).trim(), remoteHead);
+  const result = await commands.sync(layout, quiet);
+  assert.equal(result.pushed, true);
+  assert.equal(git(layout.dataRoot, ['rev-parse', 'HEAD']).trim(), remoteHead);
+  assert.equal(M.parse({ registry: fs.readFileSync(path.join(layout.dataRoot, 'TRACKFILE.md'), 'utf8') }).byId.get('001').title, 'Changed remotely');
+  assert.equal(git(layout.dataRoot, ['status', '--porcelain']).trim(), '');
+});
+
+test('multiline comments retain their text, commit a single-line subject, and allow subsequent edits', async () => {
+  const { layout, origin } = await sharedRepo();
+  const text = 'First paragraph.\n\nSecond paragraph.\r\n- item';
+  const result = await commands.comment(layout, '001', text, { marker: 'alice', ...quiet });
+  assert.equal(result.pushed, true);
+  const comments = git(origin, ['show', 'trackfile:.trackfile/tasks/001/comments.md']);
+  assert.equal(M.parseComments(comments)[0].text, text.replace(/\r\n/g, '\n'));
+  assert.equal(git(layout.dataRoot, ['log', '-1', '--format=%s']).trim(), '#001 [commented]: First paragraph. Second paragraph. - item');
+  assert.equal(git(layout.dataRoot, ['status', '--porcelain']).trim(), '');
+  const next = await commands.setField(layout, '001', 'status', 'review', { marker: 'alice', ...quiet });
+  assert.equal(next.pushed, true);
+});
+
+test('sync merges local archiving with remote edits and publishes a valid registry/archive pair', async () => {
+  const { readRegistryFiles } = require('../lib/layout.cjs');
+  const { layout, origin } = await sharedRepo();
+  const other = tmp('trackfile-cmd-archive-');
+  git(other, ['clone', '-q', '--branch', 'trackfile', origin, '.']);
+  const otherFile = path.join(other, 'TRACKFILE.md');
+  fs.writeFileSync(otherFile, fs.readFileSync(otherFile, 'utf8').replace('Feature one', 'Remote feature'));
+  git(other, ['add', '-A']);
+  git(other, ['-c', 'user.email=b@b.com', '-c', 'user.name=B', 'commit', '-qm', 'remote title']);
+  git(other, ['push', '-q', 'origin', 'trackfile']);
+  const doc = M.parse(readRegistryFiles(layout)), changes = M.archive(doc, ['008']);
+  const { diskPath } = require('../lib/layout.cjs');
+  for (const [name, text] of Object.entries(changes)) {
+    const file = diskPath(layout, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+  }
+  git(layout.dataRoot, ['add', '-A']);
+  assert.equal((await commands.sync(layout, quiet)).pushed, true);
+  const published = M.parse({ registry: git(origin, ['show', 'trackfile:TRACKFILE.md']), archive: git(origin, ['show', 'trackfile:.trackfile/archive.md']) });
+  assert.equal(published.byId.get('008').archived, true);
+  assert.equal(published.byId.get('001').title, 'Remote feature');
+  assert.equal(published.tasks.filter(task => task.id === '008').length, 1);
+  assert.equal(git(layout.dataRoot, ['status', '--porcelain']).trim(), '');
+});
+
+test('sync refuses to publish a merge that violates references across records', async () => {
+  const { readRegistryFiles } = require('../lib/layout.cjs');
+  const { layout, origin } = await sharedRepo();
+  const other = tmp('trackfile-cmd-invalid-merge-');
+  git(other, ['clone', '-q', '--branch', 'trackfile', origin, '.']);
+  const otherFile = path.join(other, 'TRACKFILE.md');
+  const remoteDoc = M.parse({ registry: fs.readFileSync(otherFile, 'utf8') });
+  fs.writeFileSync(otherFile, M.setTaskLabels(remoteDoc, '007', ['L02']).registry);
+  git(other, ['add', '-A']);
+  git(other, ['-c', 'user.email=b@b.com', '-c', 'user.name=B', 'commit', '-qm', 'use label']);
+  git(other, ['push', '-q', 'origin', 'trackfile']);
+  const remoteHead = git(origin, ['rev-parse', 'trackfile']);
+  const localDoc = M.parse(readRegistryFiles(layout));
+  fs.writeFileSync(path.join(layout.dataRoot, 'TRACKFILE.md'), M.deleteLabel(localDoc, 'L02').registry);
+  await assert.rejects(commands.sync(layout, quiet), error => error.code === 'label_missing');
+  assert.equal(git(origin, ['rev-parse', 'trackfile']), remoteHead, 'invalid merged data must never be pushed');
+  await assert.rejects(commands.sync(layout, quiet), error => error.code === 'label_missing');
+  assert.equal(git(origin, ['rev-parse', 'trackfile']), remoteHead, 'retry must not publish the invalid local merge either');
+});

@@ -20,7 +20,7 @@ const { resolveLayout, readRegistryFiles } = require('../lib/layout.cjs');
   await fs.mkdir(path.join(repo, '.trackfile', 'tasks', '002'), { recursive: true });
   await fs.writeFile(path.join(repo, '.trackfile', 'tasks', '002', 'comments.md'), F.comments());
   await fs.mkdir(path.join(repo, 'docs')); await fs.writeFile(path.join(repo, 'docs', 'design.md'), '# Design\n\nParagraph about task [#002](../TRACKFILE.md#task-002).\n');
-  await fs.writeFile(path.join(repo, '.gitignore'), '.trackfile/config.json\n');
+  await fs.writeFile(path.join(repo, '.gitignore'), '.trackfile/config.json\n.trackfile/.sync.lock\n');
   git('add', '.'); git('commit', '-q', '-m', 'initial');
   const layout = resolveLayout(repo);
   const server = createServer(layout);
@@ -106,8 +106,8 @@ const { resolveLayout, readRegistryFiles } = require('../lib/layout.cjs');
     assert.match(confirmations.at(-1), /Change its parent to #002/);
     assert.equal(readDoc().byId.get('011').parent, '002');
     assert.equal(await page.locator('.milestone-tree .tree-row[data-task="003"] .archive-chip').count(), 1, 'archived members are shown with a chip');
-    await page.locator('.milestone-filters .status-filter').click();
-    await page.locator('.milestone-filters .status-options input[value="done"]').check(); await waitSave();
+    await page.locator('#ms-status-filter').click();
+    await page.locator('#ms-status-filter .status-options input[value="done"]').check(); await waitSave();
     assert.deepEqual((await readConfig()).milestoneStatuses, ['done']);
     await page.getByRole('button', { name: '← Back' }).click();
     await page.locator('[data-view=tree]').click();
@@ -140,8 +140,43 @@ const { resolveLayout, readRegistryFiles } = require('../lib/layout.cjs');
     await page.locator('#save-task').click();
     await page.locator('#editor').waitFor({ state: 'hidden' }); await waitCommit(`#${created.id} [edit task]`);
     assert.equal(readDoc().byId.get(created.id).title, 'Changed by the user');
-    // Comments: add, deep link, done marker, edit, delete — each its own commit of the comments file only.
+    // Status, labels and relationships use the default commit path, even without an explicit operation.
+    const expectMutationCommit = async action => {
+      const previous = git('rev-parse', 'HEAD');
+      const committed = page.waitForResponse(response => response.url() === base + '/api/git/commit' && response.request().method() === 'POST');
+      const [, response] = await Promise.all([action(), committed]);
+      assert.equal(response.status(), 200);
+      const payload = await response.json();
+      await page.locator('#notice').filter({ hasText: payload.hash.slice(0, 10) }).waitFor();
+      assert.notEqual(git('rev-parse', 'HEAD'), previous, 'dashboard mutation created a commit');
+      assert.equal(git('show', '-s', '--format=%s', 'HEAD'), `#${created.id} [edit task]: Changed by the user`);
+      assert.equal(git('status', '--porcelain').trim(), '', 'dashboard leaves a clean worktree');
+    };
+    await expectMutationCommit(async () => {
+      await page.getByRole('button', { name: 'Change status ▾', exact: true }).click();
+      await page.getByRole('menuitemradio', { name: 'In review', exact: true }).click();
+    });
+    assert.equal(readDoc().byId.get(created.id).status, 'review');
+    await expectMutationCommit(async () => {
+      await page.getByRole('button', { name: 'Labels', exact: true }).click();
+      await page.locator('#label-assign-list input[value="L01"]').check();
+    });
+    await page.locator('#close-label-assign').click();
+    assert.deepEqual(readDoc().byId.get(created.id).labels, ['L01']);
+    await expectMutationCommit(async () => {
+      await page.getByRole('button', { name: 'Relationships', exact: true }).click();
+      await page.locator('#dependency-list input[value="007"]').check();
+      await page.locator('#save-dependency').click();
+      await page.locator('#dependency-editor').waitFor({ state: 'hidden' });
+    });
+    assert.deepEqual(readDoc().byId.get(created.id).blocked_by, ['007']);
+    assert.equal(readDoc().byId.get(created.id).status, 'review');
     await page.locator('.tree-select').filter({ hasText: '#' + created.id }).dblclick();
+    await expectMutationCommit(async () => {
+      await page.getByRole('button', { name: 'Change status ▾', exact: true }).click();
+      await page.getByRole('menuitemradio', { name: 'To-do', exact: true }).click();
+    });
+    // Comments: add, deep link, done marker, edit, delete — each its own commit of the comments file only.
     await page.getByRole('button', { name: '＋ Comment' }).click();
     await page.locator('#comment-body').fill(`Take this into account; reference #${Number(created.id)}.1`);
     await page.locator('#comment-form button[type="submit"]').click(); await page.locator('#comment-editor').waitFor({ state: 'hidden' }); await waitSave();
@@ -231,5 +266,8 @@ const { resolveLayout, readRegistryFiles } = require('../lib/layout.cjs');
     // Only the test's own external edits of TRACKFILE.md are pending: every UI write was committed, the config is ignored.
     assert.equal(git('status', '--porcelain').trim(), 'M TRACKFILE.md');
     console.log(JSON.stringify({ passed: true, tasks: readDoc().tasks.length, repo, screenshots: shots, checks: 'server, dashboard/milestone/tree/filter, create/edit, subtask, comments, commits, reader + back-links, stale writes, corrupt registry, persistence, language switch, removed IDs, dark/mobile layout, config conflicts, no remote requests' }));
+  } catch (error) {
+    console.error('Browser state:', await page.locator('#notice').textContent(), await page.locator('.context-menu').innerText(), await page.locator('dialog[open]').evaluateAll(nodes => nodes.map(n => n.id)), errors);
+    throw error;
   } finally { await browser.close(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
