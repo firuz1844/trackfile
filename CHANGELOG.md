@@ -11,6 +11,13 @@
 - The auto-archive cutoff (previously a fixed week) is now a project-wide setting (`archive_after_days` in the registry's front matter), editable from a new "Auto-archive" dialog under Settings.
 - Model, i18n and layout tests for all of the above.
 
+## [1.0.1](https://github.com/firuz1844/trackfile/compare/trackfile-v1.0.0...trackfile-v1.0.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* merge data loss, dashboard commits, and synchronization ([#8](https://github.com/firuz1844/trackfile/issues/8)) ([f8d1e95](https://github.com/firuz1844/trackfile/commit/f8d1e95dd2fe2ed812f6a62d0fddc93703c7678c))
+
 ## [1.0.0](https://github.com/firuz1844/trackfile/compare/trackfile-v0.2.2...trackfile-v1.0.0) (2026-09-18)
 
 
